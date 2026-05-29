@@ -1,7 +1,12 @@
 import OpenAI from "openai";
 import { z } from "zod";
-import type { AnalysisResponse } from "@/types";
+import type { AnalysisResponse, TextClassification } from "@/types";
 import { buildAnalysisResponse, enrichWithRag } from "@/lib/rag";
+import {
+  CLASSIFICATION_PROMPT,
+  classifyText,
+  classificationToTextType,
+} from "@/lib/ai/classify";
 
 const sourceCandidateSchema = z.object({
   title: z.string(),
@@ -14,6 +19,14 @@ const sampleQuestionSchema = z.object({
   question: z.string(),
   type: z.string(),
   hint: z.string().optional(),
+});
+
+const classificationSchema = z.object({
+  category: z.enum(["문학", "비문학"]),
+  subCategory: z.string(),
+  confidence: z.number().min(0).max(100),
+  reason: z.string(),
+  warnings: z.array(z.string()),
 });
 
 const literatureSchema = z.object({
@@ -51,27 +64,36 @@ const nonLiteratureSchema = z.object({
 });
 
 const analysisSchema = z.object({
-  textType: z.enum(["literature", "non_literature"]),
-  confidence: z.number().min(0).max(1),
+  classification: classificationSchema,
   analysis: z.union([literatureSchema, nonLiteratureSchema]),
 });
 
 const SYSTEM_PROMPT = `당신은 대한민국 고등학교 국어 교사를 위한 수업 분석 도우미입니다.
 
-규칙:
+${CLASSIFICATION_PROMPT}
+
+분석 규칙:
 1. 원문 전체를 재현하거나 제공하지 마세요.
 2. 짧은 인용(shortQuotes)은 각 50자 이내, 최대 3개만 포함하세요.
 3. 작품명·작가·출처는 "후보"로 제시하고 confidence(0~1)를 함께 제공하세요.
 4. 수능/내신 출제 관점에서 실용적인 분석을 제공하세요.
 5. 예상 문제는 정확히 5개 생성하세요.
-6. JSON 형식으로만 응답하세요.`;
+6. JSON 형식으로만 응답하세요.
+7. 사전 분류 결과(ruleBasedClassification)가 제공되면 이를 존중하되, 분석 내용과 모순되지 않게 조정하세요.`;
 
-function buildUserPrompt(text: string, ragContext: string): string {
+function buildUserPrompt(
+  text: string,
+  ragContext: string,
+  ruleClassification: TextClassification
+): string {
   const ragSection = ragContext
     ? `\n\n[참고 DB 컨텍스트 - 저작권 보호를 위해 발췌만 사용]\n${ragContext}`
     : "";
 
-  return `다음 지문을 분석하세요. 문학/비문학을 분류하고 해당 유형에 맞는 분석을 JSON으로 반환하세요.
+  return `다음 지문을 분석하세요.
+
+[사전 규칙 기반 분류 결과 — 우선 참고]
+${JSON.stringify(ruleClassification, null, 2)}
 
 지문:
 """
@@ -81,17 +103,22 @@ ${ragSection}
 
 응답 JSON 스키마:
 {
-  "textType": "literature" | "non_literature",
-  "confidence": 0.0~1.0,
+  "classification": {
+    "category": "문학" | "비문학",
+    "subCategory": "현대시/현대소설/고전시가/고전소설/수필/인문/사회/과학/기술/예술/융합/분류 불확실",
+    "confidence": 0~100,
+    "reason": "분류 근거",
+    "warnings": []
+  },
   "analysis": {
-    // literature인 경우:
+    // category가 문학이고 subCategory가 현대시/현대소설 등일 때:
     "type": "literature",
     "sourceCandidates": [{ "title", "author", "source", "confidence" }],
     "genre", "era", "theme", "narrator", "emotionAndAttitude",
     "expressions": [], "examPoints": [], "sampleQuestions": [{ "question", "type", "hint?" }],
     "shortQuotes": [], "summary"
 
-    // non_literature인 경우:
+    // category가 비문학일 때:
     "type": "non_literature",
     "sourceCandidates": [...],
     "field", "centralTopic",
@@ -104,15 +131,50 @@ ${ragSection}
 }`;
 }
 
-function createMockAnalysis(text: string): AnalysisResponse {
-  const isLiterature =
-    /시|詩|화자|운율|상징|운|시조|가사|소설|등장|서술|이/iu.test(text) ||
-    text.split("\n").filter((l) => l.trim()).length <= 15;
+function mergeClassification(
+  ruleBased: TextClassification,
+  ai?: z.infer<typeof classificationSchema>
+): TextClassification {
+  if (!ai) return ruleBased;
 
-  if (isLiterature) {
+  const useRuleBased =
+    ruleBased.category === "비문학" &&
+    (ruleBased.confidence >= 70 || ruleBased.warnings.some((w) => w.includes("OCR")));
+
+  if (useRuleBased) {
+    return {
+      ...ruleBased,
+      reason: `${ruleBased.reason} (AI 분류 ${ai.category}/${ai.subCategory}는 규칙 기반 결과로 보정됨)`,
+      warnings: [...new Set([...ruleBased.warnings, ...ai.warnings])],
+    };
+  }
+
+  const isUncertain = ai.confidence < 75 || ai.subCategory === "분류 불확실";
+  const subCategory =
+    isUncertain && ai.subCategory === "현대시" ? "분류 불확실" : ai.subCategory;
+
+  return {
+    category: ai.category,
+    subCategory,
+    confidence: Math.round(ai.confidence),
+    reason: ai.reason,
+    warnings: ai.warnings,
+    isUncertain: isUncertain || ruleBased.isUncertain,
+  };
+}
+
+function createMockAnalysis(
+  text: string,
+  classification: TextClassification
+): AnalysisResponse {
+  const textType = classificationToTextType(classification);
+  const confidence = classification.confidence / 100;
+
+  if (textType === "literature" && !classification.isUncertain) {
     return buildAnalysisResponse({
       textType: "literature",
-      confidence: 0.72,
+      confidence,
+      classification,
       analysis: {
         type: "literature",
         sourceCandidates: [
@@ -123,7 +185,7 @@ function createMockAnalysis(text: string): AnalysisResponse {
             confidence: 0.45,
           },
         ],
-        genre: "현대시 (서정시)",
+        genre: classification.subCategory || "현대시 (서정시)",
         era: "현대",
         theme: "그리움, 시간의 흐름, 기억과 상실",
         narrator: "1인칭 화자 — 과거의 인연을 회상하는 서정적 화자",
@@ -164,7 +226,7 @@ function createMockAnalysis(text: string): AnalysisResponse {
             hint: "직유, 은유, 의인법, 역설 등 검토",
           },
         ],
-        shortQuotes: ["그대를 만나기 전의 나는", "아무것도 모르는 빈 종이였소"],
+        shortQuotes: extractShortQuotes(text),
         summary:
           "편지를 매개로 과거의 인연을 회상하는 현대 서정시로, 그리움과 기억의 주제가 핵심입니다.",
       },
@@ -173,49 +235,37 @@ function createMockAnalysis(text: string): AnalysisResponse {
 
   return buildAnalysisResponse({
     textType: "non_literature",
-    confidence: 0.78,
+    confidence,
+    classification,
     analysis: {
       type: "non_literature",
       sourceCandidates: [
         {
-          title: "인공지능과 교육의 미래",
+          title: "지문 출처 (추정)",
           author: "미상",
-          source: "교육·과학 분야 지문 (확인 필요)",
+          source: `${classification.subCategory} 분야 지문 (확인 필요)`,
           confidence: 0.4,
         },
       ],
-      field: "과학·기술 / 교육",
-      centralTopic: "AI 기술 발전이 교육 환경에 미치는 영향과 대응 방안",
-      paragraphSummaries: [
-        { paragraph: 1, summary: "AI 기술의 급속한 발전과 교육 현장 적용 확대" },
-        { paragraph: 2, summary: "맞춤형 학습과 교사 역할 변화의 가능성" },
-        { paragraph: 3, summary: "윤리적 문제와 교사의 비판적 검토 필요성" },
-      ],
-      structure: "서론(배경) → 본론(긍정적 효과) → 본론(한계·윤리) → 결론(균형적 수용)",
-      keyConcepts: ["인공지능", "맞춤형 학습", "교사 역할", "디지털 리터러시", "윤리"],
-      claimEvidence: [
-        {
-          claim: "AI는 학습자 수준에 맞는 맞춤형 교육을 가능하게 한다.",
-          evidence: "개인별 학습 데이터 분석을 통한 콘텐츠 추천 사례",
-        },
-        {
-          claim: "교사는 AI 결과를 비판적으로 검토해야 한다.",
-          evidence: "AI의 편향성과 오류 가능성에 대한 논의",
-        },
-      ],
+      field: classification.subCategory || "인문·사회",
+      centralTopic: inferCentralTopic(text),
+      paragraphSummaries: inferParagraphSummaries(text),
+      structure: inferStructure(text),
+      keyConcepts: inferKeyConcepts(text),
+      claimEvidence: inferClaimEvidence(text),
       examPoints: [
         "글의 논지와 근거의 연결 관계 파악",
-        "필자의 태도(긍정적 수용 + 비판적 경계)",
-        "개념 간 논리적 관계 (AI → 맞춤형 학습 → 교사 역할)",
+        "필자의 태도 및 논조 파악",
+        "개념 간 논리적 관계 정리",
         "타당성 판단: 근거가 주장을 뒷받침하는가",
       ],
       sampleQuestions: [
         {
-          question: "필자가 AI 교육에 대해 취하는 태도를 서술하시오.",
+          question: "필자의 중심 주장을 한 문장으로 서술하시오.",
           type: "서술형",
         },
         {
-          question: "2문단의 중심 내용을 한 문장으로 요약하시오.",
+          question: "2문단의 중심 내용을 요약하시오.",
           type: "서술형",
         },
         {
@@ -227,15 +277,75 @@ function createMockAnalysis(text: string): AnalysisResponse {
           type: "서술형",
         },
         {
-          question: "'맞춤형 학습'의 의미를 글의 맥락에서 설명하시오.",
+          question: "글에 등장하는 핵심 개념의 의미를 맥락에 맞게 설명하시오.",
           type: "서술형",
         },
       ],
-      shortQuotes: [],
-      summary:
-        "AI와 교육의 관계를 다룬 설명문으로, 기술의 가능성과 한계를 균형 있게 논의합니다.",
+      shortQuotes: extractShortQuotes(text, 1),
+      summary: `${classification.subCategory} 분야의 설명/논설 지문으로, ${classification.reason}`,
     },
   });
+}
+
+function extractShortQuotes(text: string, max = 2): string[] {
+  const sentences = text
+    .replace(/\n+/g, " ")
+    .split(/[.!?。]\s*/)
+    .map((s) => s.trim())
+    .filter((s) => s.length >= 8 && s.length <= 50);
+  return sentences.slice(0, max);
+}
+
+function inferCentralTopic(text: string): string {
+  const firstParagraph = text.split(/\n\s*\n/)[0]?.replace(/\n/g, " ").slice(0, 120);
+  return firstParagraph
+    ? `${firstParagraph}… (핵심 화제 — 교사 확인 필요)`
+    : "지문의 중심 화제 (교사 확인 필요)";
+}
+
+function inferParagraphSummaries(text: string) {
+  const paragraphs = text.split(/\n\s*\n+/).filter((p) => p.trim().length > 20);
+  if (paragraphs.length === 0) {
+    const lines = text.split("\n").filter((l) => l.trim());
+    return lines.slice(0, 3).map((line, i) => ({
+      paragraph: i + 1,
+      summary: line.trim().slice(0, 80) + (line.length > 80 ? "…" : ""),
+    }));
+  }
+  return paragraphs.slice(0, 5).map((p, i) => ({
+    paragraph: i + 1,
+    summary: p.replace(/\n/g, " ").trim().slice(0, 100) + (p.length > 100 ? "…" : ""),
+  }));
+}
+
+function inferStructure(text: string): string {
+  const connectorCount = (text.match(/따라서|그러나|반면|즉|예를 들어/g) ?? []).length;
+  if (connectorCount >= 3) return "서론(도입) → 본론(주장·근거) → 결론(정리) — 논설문 구조";
+  return "개념 제시 → 설명·예시 → 정리 — 설명문 구조";
+}
+
+function inferKeyConcepts(text: string): string[] {
+  const matches = text.match(/[가-힣]{2,8}(?:\s*(?:이란|란|이다|적|성))/g) ?? [];
+  const unique = [...new Set(matches.map((m) => m.replace(/(?:이란|란|이다|적|성)$/, "").trim()))];
+  return unique.slice(0, 5).length > 0 ? unique.slice(0, 5) : ["핵심 개념 (교사 확인 필요)"];
+}
+
+function inferClaimEvidence(text: string) {
+  const hasClaim = /주장|해야|필요|중요|문제|해결/.test(text);
+  if (!hasClaim) {
+    return [
+      {
+        claim: "글의 중심 내용 (교사 확인 필요)",
+        evidence: "지문 내 근거 문장 확인 필요",
+      },
+    ];
+  }
+  return [
+    {
+      claim: "필자의 주장 또는 관점 (교사 확인 필요)",
+      evidence: "지문 내 근거·예시 문장",
+    },
+  ];
 }
 
 export async function analyzeText(text: string): Promise<AnalysisResponse> {
@@ -244,15 +354,14 @@ export async function analyzeText(text: string): Promise<AnalysisResponse> {
     throw new Error("분석할 텍스트가 비어 있습니다.");
   }
 
+  const ruleClassification = classifyText(trimmed);
+  const textType = classificationToTextType(ruleClassification);
+  const rag = await enrichWithRag(trimmed.slice(0, 200), textType);
+
   const provider = process.env.AI_PROVIDER ?? "mock";
 
-  const textTypeGuess = /시|화자|운|소설|등장|서사|詩|作/u.test(trimmed)
-    ? "literature"
-    : "non_literature";
-  const rag = await enrichWithRag(trimmed.slice(0, 200), textTypeGuess);
-
   if (provider === "mock" || !process.env.OPENAI_API_KEY) {
-    const mock = createMockAnalysis(trimmed);
+    const mock = createMockAnalysis(trimmed, ruleClassification);
     return {
       ...mock,
       ragContextUsed: rag.used,
@@ -268,9 +377,12 @@ export async function analyzeText(text: string): Promise<AnalysisResponse> {
     response_format: { type: "json_object" },
     messages: [
       { role: "system", content: SYSTEM_PROMPT },
-      { role: "user", content: buildUserPrompt(trimmed, rag.context) },
+      {
+        role: "user",
+        content: buildUserPrompt(trimmed, rag.context, ruleClassification),
+      },
     ],
-    temperature: 0.4,
+    temperature: 0.3,
   });
 
   const content = completion.choices[0]?.message?.content;
@@ -279,9 +391,24 @@ export async function analyzeText(text: string): Promise<AnalysisResponse> {
   }
 
   const parsed = analysisSchema.parse(JSON.parse(content));
+  const classification = mergeClassification(ruleClassification, parsed.classification);
+  const finalTextType = classificationToTextType(classification);
+
+  if (parsed.analysis.type !== finalTextType) {
+    const mock = createMockAnalysis(trimmed, classification);
+    return {
+      ...mock,
+      analysis: parsed.analysis.type === finalTextType ? parsed.analysis : mock.analysis,
+      ragContextUsed: rag.used,
+      ragSources: rag.sources,
+    };
+  }
 
   return buildAnalysisResponse({
-    ...parsed,
+    textType: finalTextType,
+    confidence: classification.confidence / 100,
+    classification,
+    analysis: parsed.analysis,
     ragContextUsed: rag.used,
     ragSources: rag.sources,
   });

@@ -22,30 +22,48 @@ export function AnalysisResultView({
   onExport,
   isExporting,
 }: AnalysisResultProps) {
-  const { analysis, textType, confidence, disclaimer, ragContextUsed, ragSources } = result;
+  const { analysis, classification, disclaimer, ragContextUsed, ragSources } = result;
   const isLiterature = analysis.type === "literature";
+  const isUncertain = classification.isUncertain;
 
   return (
     <div className="animate-fade-in space-y-4">
       <div
         className={`rounded-2xl p-4 text-white shadow-md ${
-          isLiterature
-            ? "bg-gradient-to-br from-literature to-purple-700"
-            : "bg-gradient-to-br from-non-literature to-teal-700"
+          isUncertain
+            ? "bg-gradient-to-br from-warning to-amber-700"
+            : isLiterature
+              ? "bg-gradient-to-br from-literature to-purple-700"
+              : "bg-gradient-to-br from-non-literature to-teal-700"
         }`}
       >
         <div className="flex items-start justify-between">
           <div>
             <p className="text-xs font-medium text-white/80">분류 결과</p>
             <h2 className="text-xl font-bold">
-              {isLiterature ? "📖 문학" : "📄 비문학"}
+              {isUncertain
+                ? "⚠️ 분류 불확실"
+                : isLiterature
+                  ? "📖 문학"
+                  : "📄 비문학"}
             </h2>
+            <p className="mt-1 text-sm text-white/90">
+              {classification.category} · {classification.subCategory}
+            </p>
           </div>
           <span className="rounded-full bg-white/20 px-3 py-1 text-xs font-medium">
-            신뢰도 {Math.round(confidence * 100)}%
+            신뢰도 {classification.confidence}%
           </span>
         </div>
-        <p className="mt-2 text-sm text-white/90">{analysis.summary}</p>
+        <p className="mt-2 text-sm text-white/90">{classification.reason}</p>
+        {classification.warnings.length > 0 && (
+          <ul className="mt-2 space-y-1 text-xs text-white/85">
+            {classification.warnings.map((w, i) => (
+              <li key={i}>• {w}</li>
+            ))}
+          </ul>
+        )}
+        <p className="mt-2 text-sm text-white/80">{analysis.summary}</p>
       </div>
 
       <DisclaimerBanner disclaimer={disclaimer} compact />

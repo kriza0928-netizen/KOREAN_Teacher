@@ -1,5 +1,30 @@
 export type TextType = "literature" | "non_literature";
 
+export type CategoryLabel = "문학" | "비문학";
+
+export type SubCategoryLabel =
+  | "현대시"
+  | "현대소설"
+  | "고전시가"
+  | "고전소설"
+  | "수필"
+  | "인문"
+  | "사회"
+  | "과학"
+  | "기술"
+  | "예술"
+  | "융합"
+  | "분류 불확실";
+
+export interface TextClassification {
+  category: CategoryLabel;
+  subCategory: SubCategoryLabel | string;
+  confidence: number;
+  reason: string;
+  warnings: string[];
+  isUncertain: boolean;
+}
+
 export interface SourceCandidate {
   title: string;
   author: string;
@@ -54,6 +79,7 @@ export type AnalysisResult = LiteratureAnalysis | NonLiteratureAnalysis;
 export interface AnalysisResponse {
   textType: TextType;
   confidence: number;
+  classification: TextClassification;
   analysis: AnalysisResult;
   disclaimer: Disclaimer;
   ragContextUsed: boolean;

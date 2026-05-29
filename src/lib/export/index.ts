@@ -21,8 +21,25 @@ export function buildExportDocument(
   analysis: AnalysisResponse,
   format: "pdf" | "hwp"
 ): ExportDocument {
-  const { analysis: data, textType, disclaimer } = analysis;
+  const { analysis: data, classification, disclaimer } = analysis;
   const sections: ExportSection[] = [];
+
+  sections.push({
+    heading: "지문 분류",
+    items: [
+      { label: "대분류", value: classification.category },
+      { label: "세부 분류", value: classification.subCategory },
+      { label: "신뢰도", value: `${classification.confidence}%` },
+      { label: "분류 근거", value: classification.reason },
+      ...(classification.isUncertain
+        ? [{ label: "상태", value: "분류 불확실 — 교사 검토 필요" }]
+        : []),
+      ...classification.warnings.map((w, i) => ({
+        label: `주의 ${i + 1}`,
+        value: w,
+      })),
+    ],
+  });
 
   sections.push({
     heading: "출처 후보",
@@ -120,7 +137,7 @@ export function buildExportDocument(
   return {
     title: "국어 수업 분석 자료",
     generatedAt: new Date().toLocaleString("ko-KR"),
-    textType: textType === "literature" ? "문학" : "비문학",
+    textType: `${classification.category} (${classification.subCategory})`,
     sections,
     disclaimer: [
       disclaimer.sourceAccuracy,
