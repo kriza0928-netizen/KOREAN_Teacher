@@ -3,7 +3,7 @@ interface HeaderProps {
   totalSteps: number;
 }
 
-const STEP_LABELS = ["촬영", "텍스트", "분석"];
+const STEP_LABELS = ["촬영", "결과"];
 
 export function Header({ step, totalSteps }: HeaderProps) {
   return (
@@ -12,7 +12,7 @@ export function Header({ step, totalSteps }: HeaderProps) {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-lg font-bold tracking-tight">국어 지문 분석</h1>
-            <p className="text-xs text-white/70">교사용 수업 준비 도우미</p>
+            <p className="text-xs text-white/70">GPT-4o Vision · 교사용</p>
           </div>
           <div className="flex items-center gap-1.5">
             {Array.from({ length: totalSteps }, (_, i) => (

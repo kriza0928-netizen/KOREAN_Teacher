@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { classifyText } from "@/lib/ai/classify";
-import { validatePreClassification } from "@/lib/ocr/validate";
+import { validatePreClassification } from "@/lib/vision/validate";
+import { VISION_PROVIDER } from "@/lib/ai/vision-analyze";
 
 export const runtime = "nodejs";
 
@@ -8,9 +9,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const text = body.text as string;
-    const ocr = body.ocr as
-      | { success: boolean; confidence: number; provider: string }
-      | undefined;
+    const extractionConfidence = (body.extractionConfidence as number) ?? 90;
 
     if (!text || typeof text !== "string") {
       return NextResponse.json({ error: "분류할 텍스트가 필요합니다." }, { status: 400 });
@@ -18,9 +17,9 @@ export async function POST(request: NextRequest) {
 
     const preCheck = validatePreClassification({
       text,
-      success: ocr?.success ?? false,
-      confidence: ocr?.confidence ?? 0,
-      provider: ocr?.provider ?? "mock",
+      success: true,
+      confidence: extractionConfidence,
+      provider: VISION_PROVIDER,
     });
 
     if (preCheck) {

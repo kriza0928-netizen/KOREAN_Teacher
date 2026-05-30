@@ -29,11 +29,14 @@ export function buildExportDocument(
   const sections: ExportSection[] = [];
 
   sections.push({
-    heading: "OCR 상태",
+    heading: "텍스트 추출",
     items: [
-      { label: "OCR 성공", value: ocr.success ? "성공" : "실패" },
-      { label: "OCR 신뢰도", value: `${ocr.confidence}%` },
-      { label: "OCR Provider", value: ocr.provider },
+      { label: "추출 성공", value: ocr.success ? "성공" : "실패" },
+      { label: "추출 신뢰도", value: `${ocr.confidence}%` },
+      { label: "Provider", value: ocr.provider },
+      ...(response.extractedText
+        ? [{ label: "추출 텍스트", value: response.extractedText.slice(0, 500) + (response.extractedText.length > 500 ? "…" : "") }]
+        : []),
     ],
   });
 

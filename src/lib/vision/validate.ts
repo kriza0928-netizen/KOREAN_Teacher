@@ -1,13 +1,7 @@
 import type { AnalysisResponse, AnalysisStatus, OcrMeta } from "@/types";
 import { DEFAULT_DISCLAIMER } from "@/lib/rag";
 
-export const OCR_BLOCKED_PHRASES = [
-  "OCR API 키가 설정되지 않아",
-  "샘플 텍스트",
-  "GOOGLE_CLOUD_VISION_API_KEY",
-  "OCR_PROVIDER",
-  "[MVP 데모]",
-] as const;
+export const VISION_PROVIDER = "gpt-4o-vision";
 
 export const MIN_TEXT_LENGTH = 200;
 export const MIN_OCR_CONFIDENCE_PERCENT = 80;
@@ -16,26 +10,26 @@ export const MIN_CLASSIFICATION_CONFIDENCE = 75;
 export const INSUFFICIENT_TEXT_MESSAGE =
   "분석할 텍스트가 충분하지 않습니다.\nOCR 인식이 실패했거나 지문이 일부만 촬영되었습니다.";
 
-export interface OcrValidationInput {
+export interface ExtractionValidationInput {
   text: string;
   success: boolean;
   confidence: number;
   provider: string;
 }
 
-export function normalizeOcrConfidencePercent(confidence: number): number {
+export function normalizeExtractionConfidencePercent(confidence: number): number {
   if (confidence <= 1) {
     return Math.round(confidence * 100);
   }
   return Math.round(confidence);
 }
 
-export function containsBlockedOcrContent(text: string): boolean {
-  return OCR_BLOCKED_PHRASES.some((phrase) => text.includes(phrase));
+export function isRealVisionProvider(provider: string): boolean {
+  return provider === VISION_PROVIDER;
 }
 
 export function isRealOcrProvider(provider: string): boolean {
-  return provider !== "mock" && provider.length > 0;
+  return isRealVisionProvider(provider);
 }
 
 export function buildOcrMeta(input: {
@@ -44,8 +38,8 @@ export function buildOcrMeta(input: {
   provider: string;
 }): OcrMeta {
   return {
-    success: input.success && isRealOcrProvider(input.provider),
-    confidence: normalizeOcrConfidencePercent(input.confidence),
+    success: input.success && isRealVisionProvider(input.provider),
+    confidence: normalizeExtractionConfidencePercent(input.confidence),
     provider: input.provider,
   };
 }
@@ -65,24 +59,16 @@ function buildBlockedResponse(
   };
 }
 
-/**
- * OCR → 길이 → OCR 신뢰도 검증
- * 통과 시 null, 실패 시 차단 응답 반환
- */
 export function validatePreClassification(
-  input: OcrValidationInput
+  input: ExtractionValidationInput
 ): AnalysisResponse | null {
   const ocr = buildOcrMeta(input);
   const text = input.text.trim();
 
-  if (
-    !input.success ||
-    !isRealOcrProvider(input.provider) ||
-    containsBlockedOcrContent(text)
-  ) {
+  if (!input.success || !isRealVisionProvider(input.provider) || !text) {
     return buildBlockedResponse(
       "ocr_invalid",
-      "OCR API가 설정되지 않았거나 OCR 인식에 실패했습니다. Google Cloud Vision API를 설정한 뒤 다시 촬영해 주세요.",
+      "텍스트 추출에 실패했습니다. 지문이 선명하게 보이도록 다시 촬영해 주세요.",
       { ...ocr, success: false }
     );
   }
@@ -94,7 +80,7 @@ export function validatePreClassification(
   if (ocr.confidence < MIN_OCR_CONFIDENCE_PERCENT) {
     return buildBlockedResponse(
       "classification_deferred",
-      "OCR 신뢰도가 80% 미만입니다. 분류 보류 — 지문을 더 선명하게 다시 촬영하거나 OCR 결과를 수정해 주세요.",
+      "텍스트 추출 신뢰도가 80% 미만입니다. 분류 보류 — 지문을 더 선명하게 다시 촬영해 주세요.",
       ocr
     );
   }
@@ -102,14 +88,14 @@ export function validatePreClassification(
   return null;
 }
 
-export function isOcrConfigured(): boolean {
-  const provider = process.env.OCR_PROVIDER ?? "mock";
-  if (provider !== "google-vision") return false;
-  return Boolean(process.env.GOOGLE_CLOUD_VISION_API_KEY);
+export function isAiConfigured(): boolean {
+  return Boolean(process.env.OPENAI_API_KEY);
 }
 
-export function isAiConfigured(): boolean {
-  const provider = process.env.AI_PROVIDER ?? "mock";
-  if (provider === "mock") return false;
-  return Boolean(process.env.OPENAI_API_KEY);
+export function isOcrConfigured(): boolean {
+  return isAiConfigured();
+}
+
+export function isVisionConfigured(): boolean {
+  return isAiConfigured();
 }

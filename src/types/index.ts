@@ -94,6 +94,7 @@ export interface AnalysisResponse {
   status: AnalysisStatus;
   message?: string;
   ocr: OcrMeta;
+  extractedText?: string;
   classification?: TextClassification;
   textType?: TextType;
   confidence?: number;

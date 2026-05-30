@@ -4,26 +4,20 @@ import { useCallback, useState } from "react";
 import type { AnalysisResponse } from "@/types";
 import { Header } from "@/components/Header";
 import { ImageCapture } from "@/components/ImageCapture";
-import { TextEditor } from "@/components/TextEditor";
 import { AnalysisResultView } from "@/components/AnalysisResult";
 import { LoadingOverlay } from "@/components/LoadingOverlay";
 import { DisclaimerBanner } from "@/components/DisclaimerBanner";
 import { DEFAULT_DISCLAIMER } from "@/lib/rag";
 
-type Step = "capture" | "edit" | "result";
+type Step = "capture" | "result";
 
 const STEP_INDEX: Record<Step, number> = {
   capture: 0,
-  edit: 1,
-  result: 2,
+  result: 1,
 };
 
 export default function HomePage() {
   const [step, setStep] = useState<Step>("capture");
-  const [ocrText, setOcrText] = useState("");
-  const [ocrConfidence, setOcrConfidence] = useState(0);
-  const [ocrProvider, setOcrProvider] = useState("");
-  const [ocrSuccess, setOcrSuccess] = useState(false);
   const [analysis, setAnalysis] = useState<AnalysisResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState("");
@@ -33,47 +27,13 @@ export default function HomePage() {
   const handleCapture = useCallback(async (file: File) => {
     setError(null);
     setLoading(true);
-    setLoadingMessage("OCR로 텍스트 추출 중...");
+    setLoadingMessage("GPT-4o Vision으로 추출·분류·분석 중... (30~60초)");
 
     try {
       const formData = new FormData();
       formData.append("image", file);
 
-      const res = await fetch("/api/ocr", { method: "POST", body: formData });
-      const data = await res.json();
-
-      if (!res.ok) throw new Error(data.error ?? "OCR 실패");
-
-      setOcrText(data.text);
-      setOcrConfidence(data.confidence);
-      setOcrProvider(data.provider);
-      setOcrSuccess(Boolean(data.success));
-      setStep("edit");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "OCR 처리 오류");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  const handleAnalyze = useCallback(async () => {
-    setError(null);
-    setLoading(true);
-    setLoadingMessage("OCR 검증 → 분류 → 분석 진행 중...");
-
-    try {
-      const res = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          text: ocrText,
-          ocr: {
-            success: ocrSuccess,
-            confidence: ocrConfidence,
-            provider: ocrProvider,
-          },
-        }),
-      });
+      const res = await fetch("/api/analyze", { method: "POST", body: formData });
       const data = await res.json();
 
       if (!res.ok) throw new Error(data.error ?? "분석 실패");
@@ -85,7 +45,7 @@ export default function HomePage() {
     } finally {
       setLoading(false);
     }
-  }, [ocrText, ocrConfidence, ocrProvider, ocrSuccess]);
+  }, []);
 
   const handleExport = useCallback(
     async (format: "pdf" | "hwp") => {
@@ -123,17 +83,13 @@ export default function HomePage() {
 
   const handleReset = () => {
     setStep("capture");
-    setOcrText("");
-    setOcrConfidence(0);
-    setOcrProvider("");
-    setOcrSuccess(false);
     setAnalysis(null);
     setError(null);
   };
 
   return (
     <div className="min-h-dvh bg-background">
-      <Header step={STEP_INDEX[step]} totalSteps={3} />
+      <Header step={STEP_INDEX[step]} totalSteps={2} />
 
       <main className="mx-auto max-w-lg px-4 py-4 safe-bottom">
         {error && (
@@ -149,18 +105,6 @@ export default function HomePage() {
               <DisclaimerBanner disclaimer={DEFAULT_DISCLAIMER} compact />
             </div>
           </>
-        )}
-
-        {step === "edit" && (
-          <TextEditor
-            text={ocrText}
-            confidence={ocrConfidence}
-            ocrSuccess={ocrSuccess}
-            onChange={setOcrText}
-            onAnalyze={handleAnalyze}
-            onBack={handleReset}
-            isLoading={loading}
-          />
         )}
 
         {step === "result" && analysis && (

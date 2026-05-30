@@ -1,6 +1,6 @@
 "use client";
 
-import { MIN_TEXT_LENGTH } from "@/lib/ocr/validate";
+import { MIN_TEXT_LENGTH } from "@/lib/vision/validate";
 
 interface TextEditorProps {
   text: string;

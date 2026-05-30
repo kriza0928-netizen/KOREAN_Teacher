@@ -16,19 +16,19 @@ interface AnalysisResultProps {
   isExporting: boolean;
 }
 
-function OcrStatusBar({ result }: { result: AnalysisResponse }) {
+function ExtractionStatusBar({ result }: { result: AnalysisResponse }) {
   const { ocr, classification } = result;
 
   return (
     <div className="grid grid-cols-3 gap-2 rounded-xl border border-border bg-white p-3 text-center shadow-sm">
       <div>
-        <p className="text-xs text-muted">OCR 성공</p>
+        <p className="text-xs text-muted">텍스트 추출</p>
         <p className={`mt-0.5 text-sm font-semibold ${ocr.success ? "text-success" : "text-red-600"}`}>
           {ocr.success ? "성공" : "실패"}
         </p>
       </div>
       <div>
-        <p className="text-xs text-muted">OCR 신뢰도</p>
+        <p className="text-xs text-muted">추출 신뢰도</p>
         <p className="mt-0.5 text-sm font-semibold text-primary">{ocr.confidence}%</p>
       </div>
       <div>
@@ -43,7 +43,7 @@ function OcrStatusBar({ result }: { result: AnalysisResponse }) {
 
 function StatusMessage({ result, onReset }: { result: AnalysisResponse; onReset: () => void }) {
   const titles: Record<string, string> = {
-    ocr_invalid: "OCR 실패",
+    ocr_invalid: "텍스트 추출 실패",
     text_insufficient: "텍스트 부족",
     classification_deferred: "분류 보류",
     classification_uncertain: "분류 불확실",
@@ -85,13 +85,20 @@ export function AnalysisResultView({
   onExport,
   isExporting,
 }: AnalysisResultProps) {
-  const { analysis, classification, disclaimer, ragContextUsed, ragSources, status } = result;
+  const { analysis, classification, disclaimer, extractedText, ragContextUsed, ragSources, status } = result;
   const isComplete = status === "complete" && analysis && classification;
 
   if (!isComplete) {
     return (
       <div className="animate-fade-in space-y-4">
-        <OcrStatusBar result={result} />
+        <ExtractionStatusBar result={result} />
+        {extractedText && (
+          <AnalysisCard title="추출된 텍스트" icon="📝" variant="warning">
+            <p className="max-h-40 overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed">
+              {extractedText}
+            </p>
+          </AnalysisCard>
+        )}
         <StatusMessage result={result} onReset={onReset} />
         <DisclaimerBanner disclaimer={disclaimer} compact />
       </div>
@@ -102,7 +109,15 @@ export function AnalysisResultView({
 
   return (
     <div className="animate-fade-in space-y-4">
-      <OcrStatusBar result={result} />
+      <ExtractionStatusBar result={result} />
+
+      {extractedText && (
+        <AnalysisCard title="추출된 텍스트 (교사 검토)" icon="📝">
+          <p className="max-h-48 overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed text-muted">
+            {extractedText}
+          </p>
+        </AnalysisCard>
+      )}
 
       <div
         className={`rounded-2xl p-4 text-white shadow-md ${
