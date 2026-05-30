@@ -29,8 +29,8 @@ export async function analyzeWithRules(input: AnalyzeInput): Promise<AnalysisRes
 
   const analysis =
     textType === "literature"
-      ? generateLiteratureDraft(trimmed, classification, input.manualSource)
-      : generateNonLiteratureDraft(trimmed, classification, input.manualSource);
+      ? generateLiteratureDraft(trimmed, classification, input.manualSource, input.workSearchMatches)
+      : generateNonLiteratureDraft(trimmed, classification, input.manualSource, input.workSearchMatches);
 
   return buildAnalysisResponse({
     status: "complete",

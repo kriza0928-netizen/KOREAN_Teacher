@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { AnalysisResponse, ManualSourceInput } from "@/types";
+import type { WorkSearchMatch, WorkSearchResult } from "@/lib/literature/types";
 import { Header } from "@/components/Header";
 import { ImageCapture } from "@/components/ImageCapture";
 import { TextEditor } from "@/components/TextEditor";
@@ -35,11 +36,62 @@ export default function HomePage() {
   const [ocrSuccess, setOcrSuccess] = useState(false);
   const [ocrLowConfidence, setOcrLowConfidence] = useState(false);
   const [manualSource, setManualSource] = useState<ManualSourceInput>({});
+  const [manualSourceTouched, setManualSourceTouched] = useState(false);
+  const [workSearchResult, setWorkSearchResult] = useState<WorkSearchResult | null>(null);
+  const [isSearchingWork, setIsSearchingWork] = useState(false);
   const [analysis, setAnalysis] = useState<AnalysisResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
+
+  const applyAutoMatch = useCallback((autoMatch: WorkSearchMatch) => {
+    setManualSource({
+      title: autoMatch.title,
+      author: autoMatch.author,
+      source: autoMatch.source ?? "작품 DB 검색",
+      searchConfidence: autoMatch.confidence,
+    });
+  }, []);
+
+  const searchWorks = useCallback(
+    async (text: string, allowAutoFill: boolean) => {
+      if (text.trim().length < 20) {
+        setWorkSearchResult(null);
+        return;
+      }
+
+      setIsSearchingWork(true);
+      try {
+        const res = await fetch("/api/search-works", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text }),
+        });
+        const data = (await res.json()) as WorkSearchResult & { error?: string };
+        if (!res.ok) throw new Error(data.error ?? "작품 검색 실패");
+
+        setWorkSearchResult(data);
+
+        if (allowAutoFill && data.autoMatch) {
+          applyAutoMatch(data.autoMatch);
+        }
+      } catch {
+        setWorkSearchResult({ phrases: [], matches: [], notFound: true });
+      } finally {
+        setIsSearchingWork(false);
+      }
+    },
+    [applyAutoMatch]
+  );
+
+  useEffect(() => {
+    if (step !== "edit") return;
+    const timer = setTimeout(() => {
+      searchWorks(ocrText, !manualSourceTouched);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [ocrText, step, searchWorks, manualSourceTouched]);
 
   const handleCapture = useCallback(async (file: File) => {
     setError(null);
@@ -53,10 +105,6 @@ export default function HomePage() {
         },
       });
 
-      console.log("[OCR page] result.text.length", result.text.length);
-      console.log("[OCR page] result.text", result.text);
-      console.log("[OCR page] result.rawText", result.rawText);
-
       setOcrRawText(result.rawText ?? result.text);
       setOcrDebug(result.debug);
       setOcrText(result.text);
@@ -68,6 +116,8 @@ export default function HomePage() {
         result.lowConfidence ?? result.confidence < MIN_OCR_CONFIDENCE_PERCENT
       );
       setManualSource({});
+      setManualSourceTouched(false);
+      setWorkSearchResult(null);
 
       if (result.lowConfidence ?? result.confidence < MIN_OCR_CONFIDENCE_PERCENT) {
         setError(LOW_OCR_CONFIDENCE_MESSAGE);
@@ -83,6 +133,21 @@ export default function HomePage() {
 
   const textManuallyVerified =
     ocrText.trim() !== initialOcrText.trim() && ocrText.trim().length > 0;
+
+  const handleManualSourceChange = useCallback((source: ManualSourceInput) => {
+    setManualSourceTouched(true);
+    setManualSource(source);
+  }, []);
+
+  const handleSelectWorkMatch = useCallback((match: WorkSearchMatch) => {
+    setManualSourceTouched(true);
+    setManualSource({
+      title: match.title,
+      author: match.author,
+      source: match.source ?? "작품 DB 검색",
+      searchConfidence: match.confidence,
+    });
+  }, []);
 
   const handleAnalyze = useCallback(async () => {
     if (ocrLowConfidence && !textManuallyVerified) {
@@ -107,6 +172,7 @@ export default function HomePage() {
           },
           manualSource,
           textManuallyVerified,
+          workSearchMatches: workSearchResult?.matches ?? [],
         }),
       });
       const data = await res.json();
@@ -135,6 +201,7 @@ export default function HomePage() {
     manualSource,
     ocrLowConfidence,
     textManuallyVerified,
+    workSearchResult,
   ]);
 
   const handleExport = useCallback(
@@ -182,6 +249,8 @@ export default function HomePage() {
     setOcrSuccess(false);
     setOcrLowConfidence(false);
     setManualSource({});
+    setManualSourceTouched(false);
+    setWorkSearchResult(null);
     setAnalysis(null);
     setError(null);
   };
@@ -216,7 +285,10 @@ export default function HomePage() {
             ocrSuccess={ocrSuccess}
             ocrLowConfidence={ocrLowConfidence}
             manualSource={manualSource}
-            onManualSourceChange={setManualSource}
+            onManualSourceChange={handleManualSourceChange}
+            workSearchResult={workSearchResult}
+            isSearchingWork={isSearchingWork}
+            onSelectWorkMatch={handleSelectWorkMatch}
             onChange={setOcrText}
             onAnalyze={handleAnalyze}
             onBack={handleReset}

@@ -94,7 +94,10 @@ export interface ManualSourceInput {
   title?: string;
   author?: string;
   source?: string;
+  searchConfidence?: number;
 }
+
+export type { WorkSearchMatch, WorkSearchResult } from "@/lib/literature/types";
 
 export interface AnalysisResponse {
   status: AnalysisStatus;
@@ -129,6 +132,7 @@ export interface AnalyzeRequest {
   manualSource?: ManualSourceInput;
   /** OCR 신뢰도가 낮을 때 사용자가 텍스트를 직접 수정·입력한 경우 */
   textManuallyVerified?: boolean;
+  workSearchMatches?: import("@/lib/literature/types").WorkSearchMatch[];
 }
 
 export interface AppState {

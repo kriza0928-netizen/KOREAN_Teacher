@@ -18,6 +18,7 @@ export interface AnalyzeInput {
     source?: string;
   };
   textManuallyVerified?: boolean;
+  workSearchMatches?: import("@/lib/literature/types").WorkSearchMatch[];
 }
 
 /** 유료 — OpenAI Vision 통합 분석 (추후 연동) */

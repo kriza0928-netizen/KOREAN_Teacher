@@ -2,7 +2,9 @@
 
 import type { ManualSourceInput } from "@/types";
 import type { OcrDebugInfo } from "@/lib/ocr/ocr-debug";
+import type { WorkSearchMatch, WorkSearchResult } from "@/lib/literature/types";
 import { OcrDebugPanel } from "@/components/OcrDebugPanel";
+import { WorkSearchPanel } from "@/components/WorkSearchPanel";
 import {
   LOW_OCR_CONFIDENCE_MESSAGE,
   MIN_OCR_CONFIDENCE_PERCENT,
@@ -19,6 +21,9 @@ interface TextEditorProps {
   ocrLowConfidence: boolean;
   manualSource: ManualSourceInput;
   onManualSourceChange: (source: ManualSourceInput) => void;
+  workSearchResult: WorkSearchResult | null;
+  isSearchingWork: boolean;
+  onSelectWorkMatch: (match: WorkSearchMatch) => void;
   onChange: (text: string) => void;
   onAnalyze: () => void;
   onBack: () => void;
@@ -35,6 +40,9 @@ export function TextEditor({
   ocrLowConfidence,
   manualSource,
   onManualSourceChange,
+  workSearchResult,
+  isSearchingWork,
+  onSelectWorkMatch,
   onChange,
   onAnalyze,
   onBack,
@@ -94,10 +102,17 @@ export function TextEditor({
         )}
       </div>
 
+      <WorkSearchPanel
+        searchResult={workSearchResult}
+        isSearching={isSearchingWork}
+        manualSource={manualSource}
+        onSelectMatch={onSelectWorkMatch}
+      />
+
       <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-        <h2 className="mb-1 text-base font-semibold text-primary">작품명 후보 직접 입력</h2>
+        <h2 className="mb-1 text-base font-semibold text-primary">작품명 직접 입력</h2>
         <p className="mb-3 text-xs text-muted">
-          무료 버전은 자동 검색 정확도가 낮습니다. 아는 경우 직접 입력하세요.
+          자동 검색 결과를 선택하거나, 아는 경우 직접 입력하세요.
         </p>
         <div className="space-y-2">
           <input

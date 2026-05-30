@@ -8,27 +8,44 @@ import type {
 
 function buildSourceCandidates(
   text: string,
-  manual?: ManualSourceInput
+  manual?: ManualSourceInput,
+  searchMatches?: import("@/lib/literature/types").WorkSearchMatch[]
 ): SourceCandidate[] {
   const candidates: SourceCandidate[] = [];
 
+  if (searchMatches && searchMatches.length > 0) {
+    for (const match of searchMatches.slice(0, 5)) {
+      candidates.push({
+        title: match.title,
+        author: match.author,
+        source: match.source ?? "작품 DB 검색",
+        confidence: match.confidence / 100,
+      });
+    }
+  }
+
   if (manual?.title?.trim()) {
+    const exists = candidates.some((c) => c.title === manual.title?.trim());
+    if (!exists) {
+      candidates.push({
+        title: manual.title.trim(),
+        author: manual.author?.trim() || "교사 입력",
+        source: manual.source?.trim() || "교사 직접 입력",
+        confidence: (manual.searchConfidence ?? 95) / 100,
+      });
+    }
+  }
+
+  if (candidates.length === 0) {
     candidates.push({
-      title: manual.title.trim(),
-      author: manual.author?.trim() || "교사 입력",
-      source: manual.source?.trim() || "교사 직접 입력",
-      confidence: 0.95,
+      title: "작품명 후보 (교사 확인 필요)",
+      author: "미상",
+      source: "작품 DB 검색 결과 없음 — 직접 입력 권장",
+      confidence: 0.3,
     });
   }
 
-  candidates.push({
-    title: "작품명 후보 (교사 확인 필요)",
-    author: "미상",
-    source: "무료 버전 — 자동 검색 미지원, 직접 입력 권장",
-    confidence: 0.3,
-  });
-
-  return candidates.slice(0, 3);
+  return candidates.slice(0, 5);
 }
 
 function extractShortQuotes(text: string, max = 2): string[] {
@@ -67,14 +84,15 @@ function inferKeyConcepts(text: string): string[] {
 export function generateLiteratureDraft(
   text: string,
   classification: TextClassification,
-  manual?: ManualSourceInput
+  manual?: ManualSourceInput,
+  searchMatches?: import("@/lib/literature/types").WorkSearchMatch[]
 ): LiteratureAnalysis {
   const hasEmotion = /그리움|슬픔|사랑|기쁨|외로|눈물|정서/.test(text);
   const hasSpeaker = /화자|나는|내가|그대|너/.test(text);
 
   return {
     type: "literature",
-    sourceCandidates: buildSourceCandidates(text, manual),
+    sourceCandidates: buildSourceCandidates(text, manual, searchMatches),
     genre: classification.subCategory || "문학",
     era: "교사 확인 필요",
     theme: hasEmotion
@@ -116,13 +134,14 @@ export function generateLiteratureDraft(
 export function generateNonLiteratureDraft(
   text: string,
   classification: TextClassification,
-  manual?: ManualSourceInput
+  manual?: ManualSourceInput,
+  searchMatches?: import("@/lib/literature/types").WorkSearchMatch[]
 ): NonLiteratureAnalysis {
   const connectorCount = (text.match(/따라서|그러나|반면|즉|예를 들어/g) ?? []).length;
 
   return {
     type: "non_literature",
-    sourceCandidates: buildSourceCandidates(text, manual),
+    sourceCandidates: buildSourceCandidates(text, manual, searchMatches),
     field: classification.subCategory || "비문학",
     centralTopic: text.slice(0, 120).replace(/\n/g, " ") + "… (초안 — 교사 확인)",
     paragraphSummaries: inferParagraphSummaries(text),
