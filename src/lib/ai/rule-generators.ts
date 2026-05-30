@@ -1,51 +1,33 @@
 import type {
   LiteratureAnalysis,
-  ManualSourceInput,
   NonLiteratureAnalysis,
   SourceCandidate,
   TextClassification,
 } from "@/types";
+import type { WorkSelection } from "@/lib/literature/types";
 
-function buildSourceCandidates(
-  text: string,
-  manual?: ManualSourceInput,
-  searchMatches?: import("@/lib/literature/types").WorkSearchMatch[]
+function buildSourceCandidatesFromSelection(
+  selected?: WorkSelection
 ): SourceCandidate[] {
-  const candidates: SourceCandidate[] = [];
-
-  if (searchMatches && searchMatches.length > 0) {
-    for (const match of searchMatches.slice(0, 5)) {
-      candidates.push({
-        title: match.title,
-        author: match.author,
-        source: match.source ?? "작품 DB 검색",
-        confidence: match.confidence / 100,
-      });
-    }
+  if (!selected?.title?.trim()) {
+    return [
+      {
+        title: "작품명 (교사 확인 필요)",
+        author: "미상",
+        source: "미선택",
+        confidence: 0.3,
+      },
+    ];
   }
 
-  if (manual?.title?.trim()) {
-    const exists = candidates.some((c) => c.title === manual.title?.trim());
-    if (!exists) {
-      candidates.push({
-        title: manual.title.trim(),
-        author: manual.author?.trim() || "교사 입력",
-        source: manual.source?.trim() || "교사 직접 입력",
-        confidence: (manual.searchConfidence ?? 95) / 100,
-      });
-    }
-  }
-
-  if (candidates.length === 0) {
-    candidates.push({
-      title: "작품명 후보 (교사 확인 필요)",
-      author: "미상",
-      source: "작품 DB 검색 결과 없음 — 직접 입력 권장",
-      confidence: 0.3,
-    });
-  }
-
-  return candidates.slice(0, 5);
+  return [
+    {
+      title: selected.title.trim(),
+      author: selected.author?.trim() || "미상",
+      source: selected.source?.trim() || (selected.mode === "db" ? "작품 DB" : "교사 직접 입력"),
+      confidence: (selected.matchScore ?? 95) / 100,
+    },
+  ];
 }
 
 function extractShortQuotes(text: string, max = 2): string[] {
@@ -84,42 +66,71 @@ function inferKeyConcepts(text: string): string[] {
 export function generateLiteratureDraft(
   text: string,
   classification: TextClassification,
-  manual?: ManualSourceInput,
-  searchMatches?: import("@/lib/literature/types").WorkSearchMatch[]
+  selectedWork?: WorkSelection
 ): LiteratureAnalysis {
   const hasEmotion = /그리움|슬픔|사랑|기쁨|외로|눈물|정서/.test(text);
   const hasSpeaker = /화자|나는|내가|그대|너/.test(text);
 
+  const dbGenre = selectedWork?.genre;
+  const dbTheme = selectedWork?.theme;
+  const dbEra = selectedWork?.era;
+  const dbGuide = selectedWork?.textbookGuide;
+
+  const theme = dbTheme
+    ? `${dbTheme} (DB 참조 — 교사 검토)`
+    : hasEmotion
+      ? "정서·인간 관계·삶의 의미 (초안 — 교사 검토)"
+      : "주제 파악 필요 (교사 검토)";
+
+  const expressions = dbGuide
+    ? [
+        `교과서 해설 참조: ${dbGuide.slice(0, 80)}…`,
+        "비유·상징: 지문 내 표현 확인 (교사 보완)",
+        "형식: 갈래에 따른 표현법 (운율·서사 등)",
+      ]
+    : [
+        "비유·상징: 지문 내 비유/은유 표현 확인 (교사 보완)",
+        "심상·정서: 핵심 시어와 정서 연결",
+        "형식: 갈래에 따른 표현법 (운율·서사 등)",
+      ];
+
+  const summaryParts = [
+    `[자동 분석 초안] ${classification.category} · ${classification.subCategory}`,
+    selectedWork ? `선택 작품: ${selectedWork.title} (${selectedWork.author})` : "",
+    dbGuide ? `교과서 해설: ${dbGuide.slice(0, 120)}…` : classification.reason,
+  ].filter(Boolean);
+
   return {
     type: "literature",
-    sourceCandidates: buildSourceCandidates(text, manual, searchMatches),
-    genre: classification.subCategory || "문학",
-    era: "교사 확인 필요",
-    theme: hasEmotion
-      ? "정서·인간 관계·삶의 의미 (초안 — 교사 검토)"
-      : "주제 파악 필요 (교사 검토)",
+    sourceCandidates: buildSourceCandidatesFromSelection(selectedWork),
+    genre: dbGenre ?? classification.subCategory ?? "문학",
+    era: dbEra ?? "교사 확인 필요",
+    theme,
     narrator: hasSpeaker
       ? "1인칭 화자 또는 서정적 화자 (초안)"
       : "화자/서술자 확인 필요",
     emotionAndAttitude: hasEmotion
       ? "그리움·애상·수용 등 정서 (키워드 기반 초안)"
-      : "정서·태도 직접 확인 필요",
-    expressions: [
-      "비유·상징: 지문 내 비유/은유 표현 확인 (교사 보완)",
-      "심상·정서: 핵심 시어와 정서 연결",
-      "형식: 갈래에 따른 표현법 (운율·서사 등)",
-    ],
+      : dbGuide
+        ? `교과서 해설 기반 정서 추론: ${dbGuide.slice(0, 60)}…`
+        : "정서·태도 직접 확인 필요",
+    expressions,
     examPoints: [
-      "화자/서술자의 정서와 태도",
+      selectedWork ? `${selectedWork.title}의 주제와 표현` : "화자/서술자의 정서와 태도",
       "핵심 시어·소재의 상징적 의미",
       "표현상의 특징 (비유·상징·역설 등)",
-      "주제와 표현의 관계",
+      dbGuide ? "교과서 해설과 지문의 연결" : "주제와 표현의 관계",
     ],
     sampleQuestions: [
-      { question: "화자의 정서를 서술하시오.", type: "서술형" },
+      { question: "화자/서술자의 정서를 서술하시오.", type: "서술형" },
       { question: "지문에 나타난 표현법을 두 가지 이상 서술하시오.", type: "서술형" },
+      {
+        question: selectedWork
+          ? `「${selectedWork.title}」의 주제를 서술하시오.`
+          : "이 작품의 주제를 한 문장으로 서술하시오.",
+        type: "서술형",
+      },
       { question: "핵심 소재/시어의 의미를 서술하시오.", type: "서술형" },
-      { question: "이 작품의 주제를 한 문장으로 서술하시오.", type: "서술형" },
       {
         question: "다음 중 이 지문의 특징으로 적절하지 않은 것은?",
         type: "선택형",
@@ -127,23 +138,24 @@ export function generateLiteratureDraft(
       },
     ],
     shortQuotes: extractShortQuotes(text),
-    summary: `[자동 분석 초안] ${classification.category} · ${classification.subCategory}. ${classification.reason}`,
+    summary: summaryParts.join(" "),
   };
 }
 
 export function generateNonLiteratureDraft(
   text: string,
   classification: TextClassification,
-  manual?: ManualSourceInput,
-  searchMatches?: import("@/lib/literature/types").WorkSearchMatch[]
+  selectedWork?: WorkSelection
 ): NonLiteratureAnalysis {
   const connectorCount = (text.match(/따라서|그러나|반면|즉|예를 들어/g) ?? []).length;
 
   return {
     type: "non_literature",
-    sourceCandidates: buildSourceCandidates(text, manual, searchMatches),
+    sourceCandidates: buildSourceCandidatesFromSelection(selectedWork),
     field: classification.subCategory || "비문학",
-    centralTopic: text.slice(0, 120).replace(/\n/g, " ") + "… (초안 — 교사 확인)",
+    centralTopic: selectedWork?.theme
+      ? `${selectedWork.theme} (선택 출처 참조)`
+      : text.slice(0, 120).replace(/\n/g, " ") + "… (초안 — 교사 확인)",
     paragraphSummaries: inferParagraphSummaries(text),
     structure:
       connectorCount >= 2

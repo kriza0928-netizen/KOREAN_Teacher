@@ -1,10 +1,7 @@
 "use client";
 
-import type { ManualSourceInput } from "@/types";
 import type { OcrDebugInfo } from "@/lib/ocr/ocr-debug";
-import type { WorkSearchMatch, WorkSearchResult } from "@/lib/literature/types";
 import { OcrDebugPanel } from "@/components/OcrDebugPanel";
-import { WorkSearchPanel } from "@/components/WorkSearchPanel";
 import {
   LOW_OCR_CONFIDENCE_MESSAGE,
   MIN_OCR_CONFIDENCE_PERCENT,
@@ -19,13 +16,8 @@ interface TextEditorProps {
   confidence: number;
   ocrSuccess: boolean;
   ocrLowConfidence: boolean;
-  manualSource: ManualSourceInput;
-  onManualSourceChange: (source: ManualSourceInput) => void;
-  workSearchResult: WorkSearchResult | null;
-  isSearchingWork: boolean;
-  onSelectWorkMatch: (match: WorkSearchMatch) => void;
   onChange: (text: string) => void;
-  onAnalyze: () => void;
+  onProceed: () => void;
   onBack: () => void;
   isLoading: boolean;
 }
@@ -38,13 +30,8 @@ export function TextEditor({
   confidence,
   ocrSuccess,
   ocrLowConfidence,
-  manualSource,
-  onManualSourceChange,
-  workSearchResult,
-  isSearchingWork,
-  onSelectWorkMatch,
   onChange,
-  onAnalyze,
+  onProceed,
   onBack,
   isLoading,
 }: TextEditorProps) {
@@ -55,7 +42,7 @@ export function TextEditor({
   const textManuallyVerified =
     text.trim() !== initialText.trim() && text.trim().length > 0;
   const blockedByLowConfidence = ocrLowConfidence && !textManuallyVerified;
-  const canAnalyze =
+  const canProceed =
     !isLoading && text.trim().length > 0 && !isTextTooShort && !blockedByLowConfidence;
 
   return (
@@ -64,10 +51,12 @@ export function TextEditor({
 
       {ocrLowConfidence && (
         <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-          <p className="font-semibold">OCR 정확도 {ocrConfidencePercent}% (기준 {MIN_OCR_CONFIDENCE_PERCENT}% 미만)</p>
+          <p className="font-semibold">
+            OCR 정확도 {ocrConfidencePercent}% (기준 {MIN_OCR_CONFIDENCE_PERCENT}% 미만)
+          </p>
           <p className="mt-2">{LOW_OCR_CONFIDENCE_MESSAGE}</p>
           <p className="mt-2 text-xs text-red-700">
-            아래 텍스트를 직접 수정·붙여넣기하면 분석을 진행할 수 있습니다.
+            아래 텍스트를 직접 수정·붙여넣기하면 다음 단계로 진행할 수 있습니다.
           </p>
         </div>
       )}
@@ -86,7 +75,7 @@ export function TextEditor({
           </span>
         </div>
         <p className="mb-3 text-sm text-muted">
-          OCR 결과를 확인·수정한 뒤 분석하세요. (최소 {MIN_TEXT_LENGTH}자)
+          OCR 결과를 확인·수정한 뒤 작품 후보를 찾으세요. (최소 {MIN_TEXT_LENGTH}자)
         </p>
         <textarea
           value={text}
@@ -97,57 +86,11 @@ export function TextEditor({
         <p className={`mt-2 text-right text-xs ${isTextTooShort ? "text-red-600" : "text-muted"}`}>
           {charCount}자 {isTextTooShort && `(최소 ${MIN_TEXT_LENGTH}자 필요)`}
         </p>
-        {textManuallyVerified && ocrLowConfidence && (
-          <p className="mt-2 text-xs text-success">텍스트가 수정되었습니다. 분석을 진행할 수 있습니다.</p>
-        )}
-      </div>
-
-      <WorkSearchPanel
-        searchResult={workSearchResult}
-        isSearching={isSearchingWork}
-        manualSource={manualSource}
-        onSelectMatch={onSelectWorkMatch}
-      />
-
-      <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-        <h2 className="mb-1 text-base font-semibold text-primary">작품명 직접 입력</h2>
-        <p className="mb-3 text-xs text-muted">
-          자동 검색 결과를 선택하거나, 아는 경우 직접 입력하세요.
-        </p>
-        <div className="space-y-2">
-          <input
-            type="text"
-            value={manualSource.title ?? ""}
-            onChange={(e) => onManualSourceChange({ ...manualSource, title: e.target.value })}
-            placeholder="작품명 (예: 무정)"
-            className="w-full rounded-lg border border-border bg-gray-50 px-3 py-2.5 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-          />
-          <input
-            type="text"
-            value={manualSource.author ?? ""}
-            onChange={(e) => onManualSourceChange({ ...manualSource, author: e.target.value })}
-            placeholder="작가 (예: 이광수)"
-            className="w-full rounded-lg border border-border bg-gray-50 px-3 py-2.5 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-          />
-          <input
-            type="text"
-            value={manualSource.source ?? ""}
-            onChange={(e) => onManualSourceChange({ ...manualSource, source: e.target.value })}
-            placeholder="출처 (예: 문학 교과서, 수능 기출)"
-            className="w-full rounded-lg border border-border bg-gray-50 px-3 py-2.5 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-          />
-        </div>
       </div>
 
       {isTextTooShort && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
           분석할 텍스트가 충분하지 않습니다. OCR 결과를 보완하거나 다시 촬영해 주세요.
-        </div>
-      )}
-
-      {blockedByLowConfidence && !isTextTooShort && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-          OCR 신뢰도가 낮아 자동 분석을 진행할 수 없습니다. 텍스트를 직접 수정·붙여넣기해 주세요.
         </div>
       )}
 
@@ -162,11 +105,11 @@ export function TextEditor({
         </button>
         <button
           type="button"
-          onClick={onAnalyze}
-          disabled={!canAnalyze}
-          className="rounded-xl bg-accent py-3.5 text-sm font-semibold text-white shadow-sm transition active:scale-[0.98] disabled:opacity-50"
+          onClick={onProceed}
+          disabled={!canProceed}
+          className="rounded-xl bg-primary py-3.5 text-sm font-semibold text-white shadow-sm transition active:scale-[0.98] disabled:opacity-50"
         >
-          {isLoading ? "분석 중..." : "분석 시작 →"}
+          {isLoading ? "처리 중..." : "작품 후보 찾기 →"}
         </button>
       </div>
     </div>

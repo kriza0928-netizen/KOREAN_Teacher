@@ -97,7 +97,7 @@ export interface ManualSourceInput {
   searchConfidence?: number;
 }
 
-export type { WorkSearchMatch, WorkSearchResult } from "@/lib/literature/types";
+export type { WorkSelection, WorkSelectionMode, WorkSearchMatch, WorkSearchResult } from "@/lib/literature/types";
 
 export interface AnalysisResponse {
   status: AnalysisStatus;
@@ -108,6 +108,7 @@ export interface AnalysisResponse {
   textType?: TextType;
   confidence?: number;
   analysis?: AnalysisResult;
+  selectedWork?: import("@/lib/literature/types").WorkSelection;
   isDraft: boolean;
   analysisProvider: string;
   disclaimer: Disclaimer;
@@ -132,7 +133,7 @@ export interface AnalyzeRequest {
   manualSource?: ManualSourceInput;
   /** OCR 신뢰도가 낮을 때 사용자가 텍스트를 직접 수정·입력한 경우 */
   textManuallyVerified?: boolean;
-  workSearchMatches?: import("@/lib/literature/types").WorkSearchMatch[];
+  selectedWork?: import("@/lib/literature/types").WorkSelection;
 }
 
 export interface AppState {

@@ -15,6 +15,10 @@ export interface LiteratureWork {
   /** 유명 구절 (+30점) */
   famousPhrases?: string[];
   aliases?: string[];
+  /** 작품 주제 */
+  theme?: string;
+  /** 교과서 해설 */
+  textbookGuide?: string;
 }
 
 export interface LiteratureWorksDatabase {
@@ -42,7 +46,6 @@ export interface WorkSearchMatch {
   author: string;
   genre?: string;
   source?: string;
-  /** 검색 점수 0~100 */
   confidence: number;
   score: number;
   matchReasons: MatchReason[];
@@ -50,10 +53,27 @@ export interface WorkSearchMatch {
   matchedPhrase: string;
 }
 
+export type WorkSelectionMode = "db" | "manual";
+
+export interface WorkSelection {
+  mode: WorkSelectionMode;
+  workId?: string;
+  title: string;
+  author: string;
+  source?: string;
+  genre?: string;
+  era?: string;
+  theme?: string;
+  textbookGuide?: string;
+  matchScore?: number;
+  matchReasons?: MatchReason[];
+}
+
 export interface WorkSearchResult {
   phrases: string[];
   normalizedText: string;
   matches: WorkSearchMatch[];
+  /** @deprecated UI에서 자동 선택하지 않음 — 후보만 표시 */
   autoMatch?: WorkSearchMatch;
   notFound: boolean;
 }

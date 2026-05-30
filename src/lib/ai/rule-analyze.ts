@@ -24,13 +24,28 @@ export async function analyzeWithRules(input: AnalyzeInput): Promise<AnalysisRes
     return { ...preCheck, extractedText: trimmed, isDraft: false, analysisProvider: "rule-based" };
   }
 
+  if (!input.selectedWork?.title?.trim()) {
+    return {
+      ...buildAnalysisResponse({
+        status: "classification_deferred",
+        message: "분석 전 작품을 선택해 주세요.",
+        ocr: ocrMeta,
+        extractedText: trimmed,
+        isDraft: false,
+        analysisProvider: "rule-based",
+        ragContextUsed: false,
+        ragSources: [],
+      }),
+    };
+  }
+
   const classification = classifyText(trimmed);
   const textType = classificationToTextType(classification);
 
   const analysis =
     textType === "literature"
-      ? generateLiteratureDraft(trimmed, classification, input.manualSource, input.workSearchMatches)
-      : generateNonLiteratureDraft(trimmed, classification, input.manualSource, input.workSearchMatches);
+      ? generateLiteratureDraft(trimmed, classification, input.selectedWork)
+      : generateNonLiteratureDraft(trimmed, classification, input.selectedWork);
 
   return buildAnalysisResponse({
     status: "complete",
@@ -40,6 +55,7 @@ export async function analyzeWithRules(input: AnalyzeInput): Promise<AnalysisRes
     textType,
     confidence: classification.confidence / 100,
     analysis,
+    selectedWork: input.selectedWork,
     isDraft: true,
     analysisProvider: "rule-based",
     ragContextUsed: false,

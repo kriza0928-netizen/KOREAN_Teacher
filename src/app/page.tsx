@@ -1,11 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import type { AnalysisResponse, ManualSourceInput } from "@/types";
-import type { WorkSearchMatch, WorkSearchResult } from "@/lib/literature/types";
+import { useCallback, useState } from "react";
+import type { AnalysisResponse, TextClassification } from "@/types";
+import type { WorkSearchMatch, WorkSearchResult, WorkSelection } from "@/lib/literature/types";
+import { enrichWorkSelection } from "@/lib/literature/search";
 import { Header } from "@/components/Header";
 import { ImageCapture } from "@/components/ImageCapture";
 import { TextEditor } from "@/components/TextEditor";
+import { WorkSelectStep } from "@/components/WorkSelectStep";
 import { AnalysisResultView } from "@/components/AnalysisResult";
 import { LoadingOverlay } from "@/components/LoadingOverlay";
 import { DisclaimerBanner } from "@/components/DisclaimerBanner";
@@ -17,12 +19,13 @@ import {
   MIN_OCR_CONFIDENCE_PERCENT,
 } from "@/lib/validation/text";
 
-type Step = "capture" | "edit" | "result";
+type Step = "capture" | "edit" | "select" | "result";
 
 const STEP_INDEX: Record<Step, number> = {
   capture: 0,
   edit: 1,
-  result: 2,
+  select: 2,
+  result: 3,
 };
 
 export default function HomePage() {
@@ -35,63 +38,18 @@ export default function HomePage() {
   const [ocrProvider, setOcrProvider] = useState("tesseract.js");
   const [ocrSuccess, setOcrSuccess] = useState(false);
   const [ocrLowConfidence, setOcrLowConfidence] = useState(false);
-  const [manualSource, setManualSource] = useState<ManualSourceInput>({});
-  const [manualSourceTouched, setManualSourceTouched] = useState(false);
+  const [classification, setClassification] = useState<TextClassification | null>(null);
   const [workSearchResult, setWorkSearchResult] = useState<WorkSearchResult | null>(null);
-  const [isSearchingWork, setIsSearchingWork] = useState(false);
+  const [workSelection, setWorkSelection] = useState<WorkSelection | null>(null);
+  const [manualOpen, setManualOpen] = useState(false);
+  const [manualTitle, setManualTitle] = useState("");
+  const [manualAuthor, setManualAuthor] = useState("");
+  const [manualSource, setManualSource] = useState("");
   const [analysis, setAnalysis] = useState<AnalysisResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
-
-  const applyAutoMatch = useCallback((autoMatch: WorkSearchMatch) => {
-    setManualSource({
-      title: autoMatch.title,
-      author: autoMatch.author,
-      source: autoMatch.source ?? "작품 DB 검색",
-      searchConfidence: autoMatch.confidence,
-    });
-  }, []);
-
-  const searchWorks = useCallback(
-    async (text: string, allowAutoFill: boolean) => {
-      if (text.trim().length < 20) {
-        setWorkSearchResult(null);
-        return;
-      }
-
-      setIsSearchingWork(true);
-      try {
-        const res = await fetch("/api/search-works", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text }),
-        });
-        const data = (await res.json()) as WorkSearchResult & { error?: string };
-        if (!res.ok) throw new Error(data.error ?? "작품 검색 실패");
-
-        setWorkSearchResult(data);
-
-        if (allowAutoFill && data.autoMatch) {
-          applyAutoMatch(data.autoMatch);
-        }
-      } catch {
-        setWorkSearchResult({ phrases: [], normalizedText: "", matches: [], notFound: true });
-      } finally {
-        setIsSearchingWork(false);
-      }
-    },
-    [applyAutoMatch]
-  );
-
-  useEffect(() => {
-    if (step !== "edit") return;
-    const timer = setTimeout(() => {
-      searchWorks(ocrText, !manualSourceTouched);
-    }, 500);
-    return () => clearTimeout(timer);
-  }, [ocrText, step, searchWorks, manualSourceTouched]);
 
   const handleCapture = useCallback(async (file: File) => {
     setError(null);
@@ -115,9 +73,13 @@ export default function HomePage() {
       setOcrLowConfidence(
         result.lowConfidence ?? result.confidence < MIN_OCR_CONFIDENCE_PERCENT
       );
-      setManualSource({});
-      setManualSourceTouched(false);
+      setClassification(null);
       setWorkSearchResult(null);
+      setWorkSelection(null);
+      setManualOpen(false);
+      setManualTitle("");
+      setManualAuthor("");
+      setManualSource("");
 
       if (result.lowConfidence ?? result.confidence < MIN_OCR_CONFIDENCE_PERCENT) {
         setError(LOW_OCR_CONFIDENCE_MESSAGE);
@@ -134,22 +96,7 @@ export default function HomePage() {
   const textManuallyVerified =
     ocrText.trim() !== initialOcrText.trim() && ocrText.trim().length > 0;
 
-  const handleManualSourceChange = useCallback((source: ManualSourceInput) => {
-    setManualSourceTouched(true);
-    setManualSource(source);
-  }, []);
-
-  const handleSelectWorkMatch = useCallback((match: WorkSearchMatch) => {
-    setManualSourceTouched(true);
-    setManualSource({
-      title: match.title,
-      author: match.author,
-      source: match.source ?? "작품 DB 검색",
-      searchConfidence: match.confidence,
-    });
-  }, []);
-
-  const handleAnalyze = useCallback(async () => {
+  const handleProceedToSelect = useCallback(async () => {
     if (ocrLowConfidence && !textManuallyVerified) {
       setError(LOW_OCR_CONFIDENCE_MESSAGE);
       return;
@@ -157,7 +104,84 @@ export default function HomePage() {
 
     setError(null);
     setLoading(true);
-    setLoadingMessage("규칙 기반 자동 분석 초안 생성 중...");
+    setLoadingMessage("지문 분류 및 작품 DB 검색 중...");
+    setWorkSelection(null);
+    setManualOpen(false);
+
+    try {
+      const [classifyRes, searchRes] = await Promise.all([
+        fetch("/api/classify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            text: ocrText,
+            extractionConfidence: ocrConfidence,
+          }),
+        }),
+        fetch("/api/search-works", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: ocrText }),
+        }),
+      ]);
+
+      const classifyData = await classifyRes.json();
+      const searchData = await searchRes.json();
+
+      if (classifyRes.ok && !classifyData.blocked && classifyData.category) {
+        setClassification(classifyData as TextClassification);
+      }
+
+      if (searchRes.ok) {
+        setWorkSearchResult(searchData as WorkSearchResult);
+      } else {
+        setWorkSearchResult({ phrases: [], normalizedText: "", matches: [], notFound: true });
+      }
+
+      setStep("select");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "작품 검색 오류");
+    } finally {
+      setLoading(false);
+    }
+  }, [
+    ocrText,
+    ocrSuccess,
+    ocrConfidence,
+    ocrProvider,
+    ocrLowConfidence,
+    textManuallyVerified,
+  ]);
+
+  const handleSelectCandidate = useCallback((match: WorkSearchMatch) => {
+    setWorkSelection(enrichWorkSelection(match));
+    setManualOpen(false);
+  }, []);
+
+  const handleSelectManual = useCallback(() => {
+    setManualOpen(true);
+    setWorkSelection(null);
+  }, []);
+
+  const handleConfirmManual = useCallback(() => {
+    if (!manualTitle.trim()) return;
+    setWorkSelection({
+      mode: "manual",
+      title: manualTitle.trim(),
+      author: manualAuthor.trim() || "미상",
+      source: manualSource.trim() || "교사 직접 입력",
+    });
+  }, [manualTitle, manualAuthor, manualSource]);
+
+  const handleAnalyze = useCallback(async () => {
+    if (!workSelection?.title?.trim()) {
+      setError("분석 전 작품을 선택하거나 직접 입력해 주세요.");
+      return;
+    }
+
+    setError(null);
+    setLoading(true);
+    setLoadingMessage("선택 작품 기준 분석 초안 생성 중...");
 
     try {
       const res = await fetch("/api/analyze", {
@@ -170,9 +194,8 @@ export default function HomePage() {
             confidence: ocrConfidence,
             provider: ocrProvider,
           },
-          manualSource,
           textManuallyVerified,
-          workSearchMatches: workSearchResult?.matches ?? [],
+          selectedWork: workSelection,
         }),
       });
       const data = await res.json();
@@ -198,10 +221,9 @@ export default function HomePage() {
     ocrConfidence,
     ocrProvider,
     ocrSuccess,
-    manualSource,
+    workSelection,
     ocrLowConfidence,
     textManuallyVerified,
-    workSearchResult,
   ]);
 
   const handleExport = useCallback(
@@ -248,16 +270,20 @@ export default function HomePage() {
     setOcrProvider("tesseract.js");
     setOcrSuccess(false);
     setOcrLowConfidence(false);
-    setManualSource({});
-    setManualSourceTouched(false);
+    setClassification(null);
     setWorkSearchResult(null);
+    setWorkSelection(null);
+    setManualOpen(false);
+    setManualTitle("");
+    setManualAuthor("");
+    setManualSource("");
     setAnalysis(null);
     setError(null);
   };
 
   return (
     <div className="min-h-dvh bg-background">
-      <Header step={STEP_INDEX[step]} totalSteps={3} />
+      <Header step={STEP_INDEX[step]} totalSteps={4} />
 
       <main className="mx-auto max-w-lg px-4 py-4 safe-bottom">
         {error && (
@@ -284,14 +310,31 @@ export default function HomePage() {
             confidence={ocrConfidence}
             ocrSuccess={ocrSuccess}
             ocrLowConfidence={ocrLowConfidence}
-            manualSource={manualSource}
-            onManualSourceChange={handleManualSourceChange}
-            workSearchResult={workSearchResult}
-            isSearchingWork={isSearchingWork}
-            onSelectWorkMatch={handleSelectWorkMatch}
             onChange={setOcrText}
-            onAnalyze={handleAnalyze}
+            onProceed={handleProceedToSelect}
             onBack={handleReset}
+            isLoading={loading}
+          />
+        )}
+
+        {step === "select" && (
+          <WorkSelectStep
+            classification={classification}
+            workSearchResult={workSearchResult}
+            isSearching={false}
+            selection={workSelection}
+            manualOpen={manualOpen}
+            manualTitle={manualTitle}
+            manualAuthor={manualAuthor}
+            manualSource={manualSource}
+            onSelectCandidate={handleSelectCandidate}
+            onSelectManual={handleSelectManual}
+            onManualTitleChange={setManualTitle}
+            onManualAuthorChange={setManualAuthor}
+            onManualSourceChange={setManualSource}
+            onConfirmManual={handleConfirmManual}
+            onAnalyze={handleAnalyze}
+            onBack={() => setStep("edit")}
             isLoading={loading}
           />
         )}

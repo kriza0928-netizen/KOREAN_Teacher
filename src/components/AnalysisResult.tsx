@@ -3,6 +3,7 @@
 import type { AnalysisResponse, AnalysisResult, LiteratureAnalysis, NonLiteratureAnalysis } from "@/types";
 import { DisclaimerBanner } from "./DisclaimerBanner";
 import { AnalysisCard, BulletList } from "./AnalysisCard";
+import { SelectedWorkBanner } from "./SelectedWorkBanner";
 
 interface AnalysisResultProps {
   result: AnalysisResponse;
@@ -97,7 +98,7 @@ export function AnalysisResultView({
   onExport,
   isExporting,
 }: AnalysisResultProps) {
-  const { analysis, classification, disclaimer, extractedText, status, isDraft } = result;
+  const { analysis, classification, disclaimer, extractedText, status, isDraft, selectedWork } = result;
   const isComplete = status === "complete" && analysis && classification;
 
   const updateAnalysis = (next: AnalysisResult) => {
@@ -119,6 +120,8 @@ export function AnalysisResultView({
   return (
     <div className="animate-fade-in space-y-4">
       <ExtractionStatusBar result={result} />
+
+      {selectedWork && <SelectedWorkBanner selection={selectedWork} />}
 
       {isDraft && (
         <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">

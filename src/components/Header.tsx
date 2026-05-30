@@ -3,7 +3,7 @@ interface HeaderProps {
   totalSteps: number;
 }
 
-const STEP_LABELS = ["촬영", "텍스트", "결과"];
+const STEP_LABELS = ["촬영", "텍스트", "작품 선택", "결과"];
 
 export function Header({ step, totalSteps }: HeaderProps) {
   return (
@@ -12,7 +12,7 @@ export function Header({ step, totalSteps }: HeaderProps) {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-lg font-bold tracking-tight">국어 지문 분석</h1>
-            <p className="text-xs text-white/70">무료 버전 · Tesseract OCR</p>
+            <p className="text-xs text-white/70">OCR → 후보 선택 → 분석</p>
           </div>
           <div className="flex items-center gap-1.5">
             {Array.from({ length: totalSteps }, (_, i) => (
@@ -25,7 +25,7 @@ export function Header({ step, totalSteps }: HeaderProps) {
             ))}
           </div>
         </div>
-        <div className="mt-2 flex gap-2 text-xs">
+        <div className="mt-2 flex flex-wrap gap-1.5 text-xs">
           {STEP_LABELS.map((label, i) => (
             <span
               key={label}

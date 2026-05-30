@@ -7,7 +7,6 @@ import {
 } from "@/lib/literature/normalize";
 import {
   AUTO_MATCH_THRESHOLD,
-  MIN_MATCH_THRESHOLD,
   SCORE,
   TOP_MATCH_COUNT,
   type LiteratureWork,
@@ -15,6 +14,7 @@ import {
   type MatchReason,
   type WorkSearchMatch,
   type WorkSearchResult,
+  type WorkSelection,
 } from "@/lib/literature/types";
 
 const db = worksDatabase as LiteratureWorksDatabase;
@@ -181,6 +181,27 @@ function toWorkSearchMatch(item: ScoredWork): WorkSearchMatch {
   };
 }
 
+export function getWorkById(workId: string): LiteratureWork | undefined {
+  return db.works.find((w) => w.id === workId);
+}
+
+export function enrichWorkSelection(match: WorkSearchMatch): WorkSelection {
+  const work = getWorkById(match.workId);
+  return {
+    mode: "db",
+    workId: match.workId,
+    title: match.title,
+    author: match.author,
+    source: match.source ?? work?.source,
+    genre: work?.genre ?? match.genre,
+    era: work?.era,
+    theme: work?.theme,
+    textbookGuide: work?.textbookGuide,
+    matchScore: match.score,
+    matchReasons: match.matchReasons,
+  };
+}
+
 export function searchLiteratureWorks(text: string): WorkSearchResult {
   const normalizedText = normalizeOcrText(text);
   const phrases = extractSearchPhrases(text);
@@ -191,7 +212,7 @@ export function searchLiteratureWorks(text: string): WorkSearchResult {
 
   const scored = db.works
     .map((work) => scoreWork(work, normalizedText))
-    .filter((item) => item.score >= MIN_MATCH_THRESHOLD)
+    .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score || b.reasons.length - a.reasons.length);
 
   const matches = scored.slice(0, TOP_MATCH_COUNT).map(toWorkSearchMatch);
