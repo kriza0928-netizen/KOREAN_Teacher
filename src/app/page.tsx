@@ -10,6 +10,7 @@ import { LoadingOverlay } from "@/components/LoadingOverlay";
 import { DisclaimerBanner } from "@/components/DisclaimerBanner";
 import { DEFAULT_DISCLAIMER } from "@/lib/rag";
 import { runTesseractOcr } from "@/lib/ocr/tesseract-browser";
+import type { OcrDebugInfo } from "@/lib/ocr/ocr-debug";
 import {
   LOW_OCR_CONFIDENCE_MESSAGE,
   MIN_OCR_CONFIDENCE_PERCENT,
@@ -26,6 +27,8 @@ const STEP_INDEX: Record<Step, number> = {
 export default function HomePage() {
   const [step, setStep] = useState<Step>("capture");
   const [ocrText, setOcrText] = useState("");
+  const [ocrRawText, setOcrRawText] = useState("");
+  const [ocrDebug, setOcrDebug] = useState<OcrDebugInfo | undefined>();
   const [initialOcrText, setInitialOcrText] = useState("");
   const [ocrConfidence, setOcrConfidence] = useState(0);
   const [ocrProvider, setOcrProvider] = useState("tesseract.js");
@@ -50,6 +53,12 @@ export default function HomePage() {
         },
       });
 
+      console.log("[OCR page] result.text.length", result.text.length);
+      console.log("[OCR page] result.text", result.text);
+      console.log("[OCR page] result.rawText", result.rawText);
+
+      setOcrRawText(result.rawText ?? result.text);
+      setOcrDebug(result.debug);
       setOcrText(result.text);
       setInitialOcrText(result.text);
       setOcrConfidence(result.confidence);
@@ -165,6 +174,8 @@ export default function HomePage() {
   const handleReset = () => {
     setStep("capture");
     setOcrText("");
+    setOcrRawText("");
+    setOcrDebug(undefined);
     setInitialOcrText("");
     setOcrConfidence(0);
     setOcrProvider("tesseract.js");
@@ -198,6 +209,8 @@ export default function HomePage() {
         {step === "edit" && (
           <TextEditor
             text={ocrText}
+            rawText={ocrRawText}
+            ocrDebug={ocrDebug}
             initialText={initialOcrText}
             confidence={ocrConfidence}
             ocrSuccess={ocrSuccess}

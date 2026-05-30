@@ -2,10 +2,19 @@
 
 import type { OcrResult } from "@/lib/providers/ocr/types";
 import { TESSERACT_PROVIDER } from "@/lib/providers/ocr/types";
-import { preprocessImageForOcr } from "@/lib/ocr/preprocess";
+import { preprocessImageVariants } from "@/lib/ocr/preprocess";
 import { MIN_OCR_CONFIDENCE_PERCENT } from "@/lib/validation/text";
+import {
+  computeOcrConfidence,
+  extractRawOcrText,
+  logFinalOcrText,
+  logTesseractRecognizeResult,
+  scoreOcrCandidate,
+  toDisplayText,
+  type OcrAttemptLog,
+  type OcrDebugInfo,
+} from "@/lib/ocr/ocr-debug";
 
-/** Tesseract PSM 모드 — 여러 모드 시도 후 최고 confidence 선택 */
 const PSM_ATTEMPTS = [
   { mode: "3" as const, label: 3 },
   { mode: "4" as const, label: 4 },
@@ -14,8 +23,23 @@ const PSM_ATTEMPTS = [
   { mode: "13" as const, label: 13 },
 ] as const;
 
+const OCR_SOURCES = [
+  { key: "grayscale", label: "전처리(흑백·확대)" },
+  { key: "fallback", label: "전처리(크롭 없음)" },
+  { key: "binary", label: "threshold 이진화" },
+] as const;
+
 export interface TesseractOcrOptions {
   onProgress?: (progress: number, message?: string) => void;
+}
+
+interface BestCandidate {
+  rawText: string;
+  displayText: string;
+  confidence: number;
+  score: number;
+  psm: number;
+  source: string;
 }
 
 export async function runTesseractOcr(
@@ -27,9 +51,15 @@ export async function runTesseractOcr(
   const report = (progress: number, message?: string) => onProgress?.(progress, message);
 
   report(0, "이미지 전처리 중...");
-  const preprocessed = await preprocessImageForOcr(file, ({ step, progress }) => {
+  const variants = await preprocessImageVariants(file, ({ step, progress }) => {
     report(progress, step);
   });
+
+  const sourceCanvas: Record<string, HTMLCanvasElement> = {
+    grayscale: variants.grayscale,
+    fallback: variants.fallback,
+    binary: variants.binary,
+  };
 
   const Tesseract = await import("tesseract.js");
   const { createWorker, PSM } = Tesseract;
@@ -51,30 +81,55 @@ export async function runTesseractOcr(
     },
   });
 
-  let bestText = "";
-  let bestConfidence = 0;
-  let bestPsm: number = PSM_ATTEMPTS[0].label;
+  const attempts: OcrAttemptLog[] = [];
+  let best: BestCandidate | null = null;
 
   try {
-    for (let i = 0; i < PSM_ATTEMPTS.length; i++) {
-      const { mode, label } = PSM_ATTEMPTS[i];
-      report(72 + Math.round((i / PSM_ATTEMPTS.length) * 18), `PSM ${label} 모드 시도 중...`);
+    for (const { key, label: sourceLabel } of OCR_SOURCES) {
+      const canvas = sourceCanvas[key];
 
-      await worker.setParameters({
-        tessedit_pageseg_mode: psmByValue[mode],
-      });
+      for (const { mode, label: psmLabel } of PSM_ATTEMPTS) {
+        report(
+          72 + Math.round((attempts.length / (OCR_SOURCES.length * PSM_ATTEMPTS.length)) * 18),
+          `${sourceLabel} · PSM ${psmLabel}`
+        );
 
-      const { data } = await worker.recognize(preprocessed);
-      const text = data.text?.trim() ?? "";
-      const confidence =
-        typeof data.confidence === "number" && data.confidence > 0
-          ? data.confidence
-          : estimateConfidence(text);
+        await worker.setParameters({
+          tessedit_pageseg_mode: psmByValue[mode],
+        });
 
-      if (confidence > bestConfidence || (confidence === bestConfidence && text.length > bestText.length)) {
-        bestText = text;
-        bestConfidence = confidence;
-        bestPsm = label;
+        const recognizeResult = await worker.recognize(canvas);
+        logTesseractRecognizeResult(`${sourceLabel}/PSM${psmLabel}`, recognizeResult);
+
+        const data = recognizeResult.data;
+        const rawText = extractRawOcrText(data);
+        const displayText = toDisplayText(rawText);
+        const confidence = computeOcrConfidence(data, rawText);
+        const score = scoreOcrCandidate(displayText, confidence);
+
+        attempts.push({
+          source: sourceLabel,
+          psm: psmLabel,
+          rawText,
+          textLength: displayText.length,
+          confidence,
+          score,
+        });
+
+        if (
+          !best ||
+          score > best.score ||
+          (score === best.score && displayText.length > best.displayText.length)
+        ) {
+          best = {
+            rawText,
+            displayText,
+            confidence,
+            score,
+            psm: psmLabel,
+            source: sourceLabel,
+          };
+        }
       }
     }
   } finally {
@@ -83,25 +138,45 @@ export async function runTesseractOcr(
 
   report(100, "OCR 완료");
 
+  const rawText = best?.rawText ?? "";
+  const displayText = best?.displayText ?? "";
+  const bestConfidence = best?.confidence ?? 0;
+
+  logFinalOcrText(rawText, displayText);
+
   const confidencePercent =
     bestConfidence <= 1 ? Math.round(bestConfidence * 100) : Math.round(bestConfidence);
 
   const lowConfidence = confidencePercent < MIN_OCR_CONFIDENCE_PERCENT;
 
+  const debug: OcrDebugInfo = {
+    attempts,
+    selectedSource: best?.source ?? "",
+    selectedPsm: best?.psm ?? 0,
+    rawText,
+    displayText,
+    confidence: confidencePercent,
+    trace: [
+      `선택: ${best?.source ?? "없음"} / PSM ${best?.psm ?? "-"}`,
+      `score=${best?.score?.toFixed(1) ?? 0} confidence=${confidencePercent}%`,
+      `raw.length=${rawText.length} display.length=${displayText.length}`,
+      rawText === displayText
+        ? "rawText === displayText (변형 없음)"
+        : "rawText !== displayText (trim만 적용됨)",
+    ],
+  };
+
+  console.log("[OCR] debug", debug);
+
   return {
-    text: bestText,
+    text: displayText,
+    rawText,
     confidence: confidencePercent,
     provider: TESSERACT_PROVIDER,
-    success: bestText.length > 0 && !lowConfidence,
-    psm: bestPsm,
+    success: displayText.length > 0 && !lowConfidence,
+    psm: best?.psm,
     preprocessed: true,
     lowConfidence,
+    debug,
   };
-}
-
-function estimateConfidence(text: string): number {
-  if (!text.trim()) return 0;
-  const koreanRatio =
-    (text.match(/[가-힣]/g)?.length ?? 0) / Math.max(text.length, 1);
-  return Math.min(65, Math.round(30 + koreanRatio * 35));
 }

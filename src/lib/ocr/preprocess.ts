@@ -5,6 +5,15 @@ export interface PreprocessProgress {
   progress: number;
 }
 
+export interface PreprocessVariants {
+  /** OCR 1순위: 흑백·대비·크롭·확대 (이진화 없음) */
+  grayscale: HTMLCanvasElement;
+  /** OCR 2순위: threshold 이진화 */
+  binary: HTMLCanvasElement;
+  /** OCR 3순위: 크롭 없이 대비·확대만 */
+  fallback: HTMLCanvasElement;
+}
+
 const CONTRAST_FACTOR = 1.45;
 const BRIGHTNESS_OFFSET = 12;
 const SCALE_FACTOR = 2.5;
@@ -80,7 +89,6 @@ function median(values: number[]): number {
     : sorted[mid];
 }
 
-/** 3×3 중값 필터로 노이즈 제거 */
 function removeNoise(data: ImageData): ImageData {
   const { width, height, data: src } = data;
   const out = cloneImageData(data);
@@ -208,8 +216,7 @@ function findTextBounds(data: ImageData, inverted: boolean): TextBounds | null {
 
 function cropCanvas(source: HTMLCanvasElement, bounds: TextBounds): HTMLCanvasElement {
   const cropped = createCanvas(bounds.width, bounds.height);
-  const ctx = getContext(cropped);
-  ctx.drawImage(
+  getContext(cropped).drawImage(
     source,
     bounds.x,
     bounds.y,
@@ -229,7 +236,7 @@ function scaleCanvas(source: HTMLCanvasElement, factor: number): HTMLCanvasEleme
     Math.round(source.height * factor)
   );
   const ctx = getContext(scaled);
-  ctx.imageSmoothingEnabled = false;
+  ctx.imageSmoothingEnabled = true;
   ctx.drawImage(source, 0, 0, scaled.width, scaled.height);
   return scaled;
 }
@@ -256,27 +263,9 @@ function imageDataFromCanvas(canvas: HTMLCanvasElement): ImageData {
   return getContext(canvas).getImageData(0, 0, canvas.width, canvas.height);
 }
 
-/**
- * OCR 전 이미지 전처리:
- * 흑백 → 대비/밝기 → 노이즈 제거 → 텍스트 영역 크롭 → 2.5배 확대 → threshold
- */
-export async function preprocessImageForOcr(
-  file: File,
-  onProgress?: (progress: PreprocessProgress) => void
-): Promise<HTMLCanvasElement> {
-  onProgress?.({ step: "이미지 불러오는 중", progress: 5 });
-  const img = await loadImageFromFile(file);
-
-  const base = createCanvas(img.width, img.height);
-  getContext(base).drawImage(img, 0, 0);
-
-  onProgress?.({ step: "흑백 변환", progress: 15 });
+function buildEnhancedGrayscale(base: HTMLCanvasElement, crop: boolean): HTMLCanvasElement {
   let data = toGrayscale(imageDataFromCanvas(base));
-
-  onProgress?.({ step: "대비·밝기 보정", progress: 25 });
   data = adjustContrastAndBrightness(data);
-
-  onProgress?.({ step: "노이즈 제거", progress: 35 });
   data = removeNoise(data);
 
   const inverted = shouldInvert(data);
@@ -284,23 +273,54 @@ export async function preprocessImageForOcr(
     data = invertGrayscale(data);
   }
 
-  onProgress?.({ step: "텍스트 영역 자동 크롭", progress: 45 });
   let canvas = putImageDataOnCanvas(data);
-  const bounds = findTextBounds(data, inverted);
-  if (bounds && bounds.width > 40 && bounds.height > 40) {
-    canvas = cropCanvas(canvas, bounds);
-    data = imageDataFromCanvas(canvas);
+
+  if (crop) {
+    const bounds = findTextBounds(data, inverted);
+    if (bounds && bounds.width > 40 && bounds.height > 40) {
+      canvas = cropCanvas(canvas, bounds);
+    }
   }
 
-  onProgress?.({ step: "이미지 확대 (2.5배)", progress: 55 });
-  canvas = scaleCanvas(canvas, SCALE_FACTOR);
-  data = imageDataFromCanvas(canvas);
+  return scaleCanvas(canvas, SCALE_FACTOR);
+}
 
-  onProgress?.({ step: "threshold 처리", progress: 65 });
-  const threshold = computeOtsuThreshold(data);
-  data = applyThreshold(data, threshold);
-  canvas = putImageDataOnCanvas(data);
+/**
+ * OCR용 이미지 변형 3종 생성.
+ * Tesseract에는 이진화(grayscale) 이미지를 우선 사용 — threshold만 적용한 이미지는 한글 OCR에 불리.
+ */
+export async function preprocessImageVariants(
+  file: File,
+  onProgress?: (progress: PreprocessProgress) => void
+): Promise<PreprocessVariants> {
+  onProgress?.({ step: "이미지 불러오는 중", progress: 5 });
+  const img = await loadImageFromFile(file);
+
+  const base = createCanvas(img.width, img.height);
+  getContext(base).drawImage(img, 0, 0);
+
+  onProgress?.({ step: "흑백·대비·크롭·확대", progress: 25 });
+  const grayscale = buildEnhancedGrayscale(base, true);
+
+  onProgress?.({ step: "threshold 변형 생성", progress: 45 });
+  const binaryData = applyThreshold(
+    imageDataFromCanvas(grayscale),
+    computeOtsuThreshold(imageDataFromCanvas(grayscale))
+  );
+  const binary = putImageDataOnCanvas(binaryData);
+
+  onProgress?.({ step: "fallback 변형 생성", progress: 55 });
+  const fallback = buildEnhancedGrayscale(base, false);
 
   onProgress?.({ step: "전처리 완료", progress: 70 });
-  return canvas;
+  return { grayscale, binary, fallback };
+}
+
+/** @deprecated preprocessImageVariants 사용 */
+export async function preprocessImageForOcr(
+  file: File,
+  onProgress?: (progress: PreprocessProgress) => void
+): Promise<HTMLCanvasElement> {
+  const variants = await preprocessImageVariants(file, onProgress);
+  return variants.grayscale;
 }

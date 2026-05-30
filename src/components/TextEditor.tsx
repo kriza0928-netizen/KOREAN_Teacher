@@ -1,6 +1,8 @@
 "use client";
 
 import type { ManualSourceInput } from "@/types";
+import type { OcrDebugInfo } from "@/lib/ocr/ocr-debug";
+import { OcrDebugPanel } from "@/components/OcrDebugPanel";
 import {
   LOW_OCR_CONFIDENCE_MESSAGE,
   MIN_OCR_CONFIDENCE_PERCENT,
@@ -9,6 +11,8 @@ import {
 
 interface TextEditorProps {
   text: string;
+  rawText: string;
+  ocrDebug?: OcrDebugInfo;
   initialText: string;
   confidence: number;
   ocrSuccess: boolean;
@@ -23,6 +27,8 @@ interface TextEditorProps {
 
 export function TextEditor({
   text,
+  rawText,
+  ocrDebug,
   initialText,
   confidence,
   ocrSuccess,
@@ -46,6 +52,8 @@ export function TextEditor({
 
   return (
     <div className="animate-fade-in space-y-4">
+      <OcrDebugPanel rawText={rawText} displayText={text} debug={ocrDebug} />
+
       {ocrLowConfidence && (
         <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
           <p className="font-semibold">OCR 정확도 {ocrConfidencePercent}% (기준 {MIN_OCR_CONFIDENCE_PERCENT}% 미만)</p>
