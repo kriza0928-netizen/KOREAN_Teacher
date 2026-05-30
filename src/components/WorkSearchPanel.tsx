@@ -11,6 +11,29 @@ interface WorkSearchPanelProps {
   onSelectMatch: (match: WorkSearchMatch) => void;
 }
 
+function MatchReasonsList({ match }: { match: WorkSearchMatch }) {
+  if (!match.matchReasons?.length) return null;
+
+  return (
+    <div className="mt-2 rounded-lg bg-gray-50 p-2">
+      <p className="mb-1 text-[10px] font-semibold text-muted">매칭 근거</p>
+      <ul className="space-y-0.5">
+        {match.matchReasons
+          .sort((a, b) => b.points - a.points)
+          .map((reason, i) => (
+            <li key={i} className="text-[11px] text-gray-700">
+              · {reason.label}
+              {reason.similarity < 100 && (
+                <span className="text-muted"> ({reason.similarity}% 유사)</span>
+              )}
+              <span className="text-primary"> +{reason.points}점</span>
+            </li>
+          ))}
+      </ul>
+    </div>
+  );
+}
+
 export function WorkSearchPanel({
   searchResult,
   isSearching,
@@ -21,21 +44,28 @@ export function WorkSearchPanel({
     return (
       <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
         <h2 className="text-base font-semibold text-primary">작품 검색</h2>
-        <p className="mt-2 text-sm text-muted">지문 구절과 작품 DB를 비교하는 중...</p>
+        <p className="mt-2 text-sm text-muted">키워드·퍼지 매칭으로 작품 DB를 검색하는 중...</p>
       </div>
     );
   }
 
   if (!searchResult) return null;
 
-  const { phrases, matches, autoMatch, notFound } = searchResult;
+  const { phrases, normalizedText, matches, autoMatch, notFound } = searchResult;
 
   return (
     <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-      <h2 className="mb-1 text-base font-semibold text-primary">작품 검색 (무료 DB)</h2>
+      <h2 className="mb-1 text-base font-semibold text-primary">작품 검색 (키워드·퍼지)</h2>
       <p className="mb-3 text-xs text-muted">
-        OCR 지문에서 추출한 구절과 국어 교과서 작품 DB를 비교합니다.
+        OCR 오타가 있어도 키워드·별칭(alias)으로 매칭합니다. 60점 이상 후보, {AUTO_MATCH_THRESHOLD}점 이상 자동 선택.
       </p>
+
+      {normalizedText && (
+        <p className="mb-3 rounded-lg bg-gray-50 p-2 font-mono text-[10px] text-muted">
+          정규화: {normalizedText.slice(0, 80)}
+          {normalizedText.length > 80 ? "…" : ""}
+        </p>
+      )}
 
       {phrases.length > 0 && (
         <div className="mb-4 rounded-lg bg-gray-50 p-3">
@@ -52,7 +82,9 @@ export function WorkSearchPanel({
 
       {autoMatch && (
         <div className="mb-4 rounded-xl border border-success/40 bg-green-50 p-4">
-          <p className="text-xs font-semibold text-success">자동 매칭 ({autoMatch.confidence}% ≥ {AUTO_MATCH_THRESHOLD}%)</p>
+          <p className="text-xs font-semibold text-success">
+            자동 매칭 ({autoMatch.score}점 ≥ {AUTO_MATCH_THRESHOLD}점)
+          </p>
           <dl className="mt-2 space-y-1 text-sm">
             <div className="flex gap-2">
               <dt className="font-medium text-gray-700">작품명:</dt>
@@ -67,9 +99,7 @@ export function WorkSearchPanel({
               <dd>{autoMatch.confidence}%</dd>
             </div>
           </dl>
-          <p className="mt-2 text-xs text-muted">
-            매칭 구절: &ldquo;{autoMatch.matchedPhrase}&rdquo; ↔ &ldquo;{autoMatch.matchedKeyword}&rdquo;
-          </p>
+          <MatchReasonsList match={autoMatch} />
         </div>
       )}
 
@@ -82,7 +112,8 @@ export function WorkSearchPanel({
           <p className="mb-2 text-xs font-medium text-muted">상위 {matches.length}개 후보</p>
           <div className="space-y-2">
             {matches.map((match) => {
-              const selected = manualSource.title === match.title && manualSource.author === match.author;
+              const selected =
+                manualSource.title === match.title && manualSource.author === match.author;
               return (
                 <button
                   key={match.workId}
@@ -104,12 +135,10 @@ export function WorkSearchPanel({
                       )}
                     </div>
                     <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
-                      {match.confidence}%
+                      {match.score}점
                     </span>
                   </div>
-                  <p className="mt-1 text-xs text-muted">
-                    &ldquo;{match.matchedPhrase}&rdquo; ↔ &ldquo;{match.matchedKeyword}&rdquo;
-                  </p>
+                  <MatchReasonsList match={match} />
                 </button>
               );
             })}

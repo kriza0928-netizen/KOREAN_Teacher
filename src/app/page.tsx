@@ -77,7 +77,7 @@ export default function HomePage() {
           applyAutoMatch(data.autoMatch);
         }
       } catch {
-        setWorkSearchResult({ phrases: [], matches: [], notFound: true });
+        setWorkSearchResult({ phrases: [], normalizedText: "", matches: [], notFound: true });
       } finally {
         setIsSearchingWork(false);
       }
