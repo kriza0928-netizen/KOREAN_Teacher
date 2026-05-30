@@ -5,7 +5,6 @@ type TesseractPage = {
   confidence?: number | null;
   blocks?: Array<{
     text?: string;
-    confidence?: number;
     paragraphs?: Array<{
       text?: string;
       lines?: Array<{
@@ -18,20 +17,42 @@ type TesseractPage = {
 
 export interface OcrAttemptLog {
   source: string;
+  sourceKey: string;
   psm: number;
   rawText: string;
   textLength: number;
   confidence: number;
-  score: number;
+  koreanRatio: number;
+  sentenceCount: number;
+  avgWordLength: number;
+  readabilityScore: number;
+}
+
+export interface OcrVariantSummary {
+  sourceKey: string;
+  label: string;
+  bestText: string;
+  bestPsm: number;
+  confidence: number;
+  koreanRatio: number;
+  sentenceCount: number;
+  avgWordLength: number;
+  readabilityScore: number;
 }
 
 export interface OcrDebugInfo {
   attempts: OcrAttemptLog[];
+  variantSummaries: OcrVariantSummary[];
   selectedSource: string;
+  selectedSourceKey: string;
   selectedPsm: number;
   rawText: string;
   displayText: string;
   confidence: number;
+  koreanRatio: number;
+  sentenceCount: number;
+  avgWordLength: number;
+  readabilityScore: number;
   trace: string[];
 }
 
@@ -45,7 +66,6 @@ export function logTesseractRecognizeResult(label: string, result: unknown): voi
   }
 }
 
-/** OCR 텍스트 — substring/slice/split 등 후처리 없이 원본 그대로 */
 export function extractRawOcrText(data: TesseractPage): string {
   const direct = data.text ?? "";
   if (direct.trim().length > 0) {
@@ -75,16 +95,11 @@ function collectTextFromBlocks(blocks: TesseractPage["blocks"]): string {
     .join("\n\n");
 }
 
-/** 표시용 텍스트 — 현재는 trim만 적용 (내용 자르기 없음) */
 export function toDisplayText(rawText: string): string {
   return rawText.trim();
 }
 
-/**
- * Tesseract confidence (MeanTextConf)와 실제 텍스트 품질을 분리 계산.
- * 짧은 오인식(예: "1"만 87%)이 긴 정상 텍스트보다 선택되지 않도록 score 사용.
- */
-export function computeOcrConfidence(data: TesseractPage, rawText: string): number {
+export function computeOcrConfidence(data: TesseractPage): number {
   const words = collectWordsFromBlocks(data.blocks);
   if (words.length > 0) {
     let weighted = 0;
@@ -101,7 +116,7 @@ export function computeOcrConfidence(data: TesseractPage, rawText: string): numb
     return data.confidence;
   }
 
-  return estimateConfidenceFromText(rawText);
+  return 0;
 }
 
 function collectWordsFromBlocks(
@@ -119,40 +134,41 @@ function collectWordsFromBlocks(
   return words;
 }
 
-export function estimateConfidenceFromText(text: string): number {
-  const trimmed = text.trim();
-  if (!trimmed) return 0;
-  const koreanRatio =
-    (trimmed.match(/[가-힣]/g)?.length ?? 0) / Math.max(trimmed.length, 1);
-  return Math.min(65, Math.round(30 + koreanRatio * 35));
-}
-
-export function scoreOcrCandidate(text: string, confidence: number): number {
-  const trimmed = text.trim();
-  if (!trimmed) return 0;
-
-  const len = trimmed.length;
-  const koreanCount = trimmed.match(/[가-힣]/g)?.length ?? 0;
-  const lengthFactor = Math.min(1, len / 30);
-  const koreanFactor = Math.min(1, koreanCount / 15);
-
-  // 1~2자짜리 고 confidence 오인식(예: "1") 페널티
-  const shortTextPenalty = len <= 2 ? 0.15 : len <= 5 ? 0.5 : 1;
-
-  return confidence * shortTextPenalty * (0.25 + 0.45 * lengthFactor + 0.3 * koreanFactor);
-}
-
 export function logFinalOcrText(rawText: string, displayText: string): void {
   console.log("[OCR] text.length", displayText.length);
   console.log("[OCR] text", displayText);
   console.log("[OCR] rawText.length", rawText.length);
   console.log("[OCR] rawText", rawText);
-  if (rawText !== displayText) {
-    console.warn("[OCR] rawText와 displayText가 다릅니다.", { rawText, displayText });
-  }
 }
 
-export function formatOcrDebugBlock(rawText: string): string {
+export function formatOcrDebugBlock(title: string, rawText: string): string {
   const body = rawText.length > 0 ? rawText : "(빈 OCR 결과)";
-  return `----- OCR 원본 -----\n${body}\n--------------------`;
+  return `----- ${title} -----\n${body}\n${"-".repeat(Math.max(20, title.length + 10))}`;
+}
+
+export function buildVariantSummaries(
+  attempts: OcrAttemptLog[],
+  debugKeys: string[]
+): OcrVariantSummary[] {
+  return debugKeys.map((sourceKey) => {
+    const variantAttempts = attempts.filter((a) => a.sourceKey === sourceKey);
+    const best = [...variantAttempts].sort(
+      (a, b) =>
+        b.readabilityScore - a.readabilityScore ||
+        b.koreanRatio - a.koreanRatio ||
+        b.textLength - a.textLength
+    )[0];
+
+    return {
+      sourceKey,
+      label: best?.source ?? sourceKey,
+      bestText: best?.rawText ?? "",
+      bestPsm: best?.psm ?? 0,
+      confidence: best?.confidence ?? 0,
+      koreanRatio: best?.koreanRatio ?? 0,
+      sentenceCount: best?.sentenceCount ?? 0,
+      avgWordLength: best?.avgWordLength ?? 0,
+      readabilityScore: best?.readabilityScore ?? 0,
+    };
+  });
 }

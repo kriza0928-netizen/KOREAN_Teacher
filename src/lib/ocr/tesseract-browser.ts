@@ -2,32 +2,47 @@
 
 import type { OcrResult } from "@/lib/providers/ocr/types";
 import { TESSERACT_PROVIDER } from "@/lib/providers/ocr/types";
-import { preprocessImageVariants } from "@/lib/ocr/preprocess";
+import {
+  buildOcrImageVariants,
+  OCR_VARIANT_LABELS,
+  type OcrImageVariants,
+} from "@/lib/ocr/preprocess";
 import { MIN_OCR_CONFIDENCE_PERCENT } from "@/lib/validation/text";
 import {
+  buildVariantSummaries,
   computeOcrConfidence,
   extractRawOcrText,
   logFinalOcrText,
   logTesseractRecognizeResult,
-  scoreOcrCandidate,
   toDisplayText,
   type OcrAttemptLog,
   type OcrDebugInfo,
 } from "@/lib/ocr/ocr-debug";
+import { computeTextQualityMetrics } from "@/lib/ocr/readability";
 
+/** PSM 3, 4, 6, 11 — 가독성 점수 최고 선택 (PSM 6은 한글 문학 우선) */
 const PSM_ATTEMPTS = [
   { mode: "3" as const, label: 3 },
   { mode: "4" as const, label: 4 },
   { mode: "6" as const, label: 6 },
   { mode: "11" as const, label: 11 },
-  { mode: "13" as const, label: 13 },
 ] as const;
 
-const OCR_SOURCES = [
-  { key: "grayscale", label: "전처리(흑백·확대)" },
-  { key: "fallback", label: "전처리(크롭 없음)" },
-  { key: "binary", label: "threshold 이진화" },
-] as const;
+const VARIANT_ORDER: (keyof OcrImageVariants)[] = [
+  "original",
+  "grayscale",
+  "threshold",
+  "scaled",
+  "denoised",
+];
+
+/** 디버그 패널에 표시할 4종 */
+const DEBUG_VARIANT_KEYS: (keyof OcrImageVariants)[] = [
+  "original",
+  "grayscale",
+  "threshold",
+  "scaled",
+];
 
 export interface TesseractOcrOptions {
   onProgress?: (progress: number, message?: string) => void;
@@ -37,9 +52,13 @@ interface BestCandidate {
   rawText: string;
   displayText: string;
   confidence: number;
-  score: number;
+  koreanRatio: number;
+  sentenceCount: number;
+  avgWordLength: number;
+  readabilityScore: number;
   psm: number;
   source: string;
+  sourceKey: string;
 }
 
 export async function runTesseractOcr(
@@ -50,16 +69,10 @@ export async function runTesseractOcr(
     typeof options === "function" ? options : options?.onProgress;
   const report = (progress: number, message?: string) => onProgress?.(progress, message);
 
-  report(0, "이미지 전처리 중...");
-  const variants = await preprocessImageVariants(file, ({ step, progress }) => {
+  report(0, "OCR 이미지 준비 중...");
+  const variants = await buildOcrImageVariants(file, ({ step, progress }) => {
     report(progress, step);
   });
-
-  const sourceCanvas: Record<string, HTMLCanvasElement> = {
-    grayscale: variants.grayscale,
-    fallback: variants.fallback,
-    binary: variants.binary,
-  };
 
   const Tesseract = await import("tesseract.js");
   const { createWorker, PSM } = Tesseract;
@@ -69,10 +82,9 @@ export async function runTesseractOcr(
     "4": PSM.SINGLE_COLUMN,
     "6": PSM.SINGLE_BLOCK,
     "11": PSM.SPARSE_TEXT,
-    "13": PSM.RAW_LINE,
   };
 
-  report(72, "Tesseract OCR 준비 중 (kor+eng)...");
+  report(72, "Tesseract OCR 준비 (kor+eng)...");
   const worker = await createWorker("kor+eng", 1, {
     logger: (info) => {
       if (info.status === "recognizing text" && typeof info.progress === "number") {
@@ -83,14 +95,18 @@ export async function runTesseractOcr(
 
   const attempts: OcrAttemptLog[] = [];
   let best: BestCandidate | null = null;
+  const totalRuns = VARIANT_ORDER.length * PSM_ATTEMPTS.length;
+  let runIndex = 0;
 
   try {
-    for (const { key, label: sourceLabel } of OCR_SOURCES) {
-      const canvas = sourceCanvas[key];
+    for (const sourceKey of VARIANT_ORDER) {
+      const canvas = variants[sourceKey];
+      const sourceLabel = OCR_VARIANT_LABELS[sourceKey];
 
       for (const { mode, label: psmLabel } of PSM_ATTEMPTS) {
+        runIndex++;
         report(
-          72 + Math.round((attempts.length / (OCR_SOURCES.length * PSM_ATTEMPTS.length)) * 18),
+          72 + Math.round((runIndex / totalRuns) * 18),
           `${sourceLabel} · PSM ${psmLabel}`
         );
 
@@ -104,31 +120,48 @@ export async function runTesseractOcr(
         const data = recognizeResult.data;
         const rawText = extractRawOcrText(data);
         const displayText = toDisplayText(rawText);
-        const confidence = computeOcrConfidence(data, rawText);
-        const score = scoreOcrCandidate(displayText, confidence);
+        const confidence = computeOcrConfidence(data);
+        const metrics = computeTextQualityMetrics(displayText, confidence, {
+          psm: psmLabel,
+          sourceKey,
+        });
 
         attempts.push({
           source: sourceLabel,
+          sourceKey,
           psm: psmLabel,
           rawText,
           textLength: displayText.length,
-          confidence,
-          score,
+          confidence: metrics.confidence,
+          koreanRatio: metrics.koreanRatio,
+          sentenceCount: metrics.sentenceCount,
+          avgWordLength: metrics.avgWordLength,
+          readabilityScore: metrics.readabilityScore,
         });
+
+        const candidate: BestCandidate = {
+          rawText,
+          displayText,
+          confidence: metrics.confidence,
+          koreanRatio: metrics.koreanRatio,
+          sentenceCount: metrics.sentenceCount,
+          avgWordLength: metrics.avgWordLength,
+          readabilityScore: metrics.readabilityScore,
+          psm: psmLabel,
+          source: sourceLabel,
+          sourceKey,
+        };
 
         if (
           !best ||
-          score > best.score ||
-          (score === best.score && displayText.length > best.displayText.length)
+          candidate.readabilityScore > best.readabilityScore ||
+          (candidate.readabilityScore === best.readabilityScore &&
+            candidate.koreanRatio > best.koreanRatio) ||
+          (candidate.readabilityScore === best.readabilityScore &&
+            candidate.koreanRatio === best.koreanRatio &&
+            candidate.displayText.length > best.displayText.length)
         ) {
-          best = {
-            rawText,
-            displayText,
-            confidence,
-            score,
-            psm: psmLabel,
-            source: sourceLabel,
-          };
+          best = candidate;
         }
       }
     }
@@ -140,29 +173,35 @@ export async function runTesseractOcr(
 
   const rawText = best?.rawText ?? "";
   const displayText = best?.displayText ?? "";
-  const bestConfidence = best?.confidence ?? 0;
+  const confidencePercent = best?.confidence ?? 0;
 
   logFinalOcrText(rawText, displayText);
 
-  const confidencePercent =
-    bestConfidence <= 1 ? Math.round(bestConfidence * 100) : Math.round(bestConfidence);
-
   const lowConfidence = confidencePercent < MIN_OCR_CONFIDENCE_PERCENT;
+
+  const variantSummaries = buildVariantSummaries(
+    attempts,
+    DEBUG_VARIANT_KEYS as string[]
+  );
 
   const debug: OcrDebugInfo = {
     attempts,
+    variantSummaries,
     selectedSource: best?.source ?? "",
+    selectedSourceKey: best?.sourceKey ?? "",
     selectedPsm: best?.psm ?? 0,
     rawText,
     displayText,
     confidence: confidencePercent,
+    koreanRatio: best?.koreanRatio ?? 0,
+    sentenceCount: best?.sentenceCount ?? 0,
+    avgWordLength: best?.avgWordLength ?? 0,
+    readabilityScore: best?.readabilityScore ?? 0,
     trace: [
       `선택: ${best?.source ?? "없음"} / PSM ${best?.psm ?? "-"}`,
-      `score=${best?.score?.toFixed(1) ?? 0} confidence=${confidencePercent}%`,
-      `raw.length=${rawText.length} display.length=${displayText.length}`,
-      rawText === displayText
-        ? "rawText === displayText (변형 없음)"
-        : "rawText !== displayText (trim만 적용됨)",
+      `가독성=${best?.readabilityScore ?? 0} confidence=${confidencePercent}%`,
+      `한글비율=${Math.round((best?.koreanRatio ?? 0) * 100)}% 문장=${best?.sentenceCount ?? 0}`,
+      `평균단어길이=${best?.avgWordLength ?? 0}`,
     ],
   };
 
@@ -175,7 +214,7 @@ export async function runTesseractOcr(
     provider: TESSERACT_PROVIDER,
     success: displayText.length > 0 && !lowConfidence,
     psm: best?.psm,
-    preprocessed: true,
+    preprocessed: best?.sourceKey !== "original",
     lowConfidence,
     debug,
   };
