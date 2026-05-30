@@ -1,4 +1,4 @@
-import type { AnalysisResponse, TextType } from "@/types";
+import type { AnalysisResponse, Disclaimer, TextType } from "@/types";
 
 export interface RagDocument {
   id: string;
@@ -89,14 +89,13 @@ export const DEFAULT_DISCLAIMER = {
 };
 
 export function buildAnalysisResponse(
-  partial: Omit<AnalysisResponse, "disclaimer" | "ragContextUsed" | "ragSources"> & {
-    ragContextUsed?: boolean;
-    ragSources?: string[];
+  partial: Omit<AnalysisResponse, "disclaimer"> & {
+    disclaimer?: Disclaimer;
   }
 ): AnalysisResponse {
   return {
     ...partial,
-    disclaimer: DEFAULT_DISCLAIMER,
+    disclaimer: partial.disclaimer ?? DEFAULT_DISCLAIMER,
     ragContextUsed: partial.ragContextUsed ?? false,
     ragSources: partial.ragSources ?? [],
   };

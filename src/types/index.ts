@@ -16,6 +16,14 @@ export type SubCategoryLabel =
   | "융합"
   | "분류 불확실";
 
+export type AnalysisStatus =
+  | "ocr_invalid"
+  | "text_insufficient"
+  | "classification_deferred"
+  | "classification_uncertain"
+  | "ai_unconfigured"
+  | "complete";
+
 export interface TextClassification {
   category: CategoryLabel;
   subCategory: SubCategoryLabel | string;
@@ -23,6 +31,12 @@ export interface TextClassification {
   reason: string;
   warnings: string[];
   isUncertain: boolean;
+}
+
+export interface OcrMeta {
+  success: boolean;
+  confidence: number;
+  provider: string;
 }
 
 export interface SourceCandidate {
@@ -77,10 +91,13 @@ export interface NonLiteratureAnalysis {
 export type AnalysisResult = LiteratureAnalysis | NonLiteratureAnalysis;
 
 export interface AnalysisResponse {
-  textType: TextType;
-  confidence: number;
-  classification: TextClassification;
-  analysis: AnalysisResult;
+  status: AnalysisStatus;
+  message?: string;
+  ocr: OcrMeta;
+  classification?: TextClassification;
+  textType?: TextType;
+  confidence?: number;
+  analysis?: AnalysisResult;
   disclaimer: Disclaimer;
   ragContextUsed: boolean;
   ragSources: string[];
@@ -90,6 +107,16 @@ export interface OcrResult {
   text: string;
   confidence: number;
   provider: string;
+  success: boolean;
+}
+
+export interface AnalyzeRequest {
+  text: string;
+  ocr: {
+    success: boolean;
+    confidence: number;
+    provider: string;
+  };
 }
 
 export interface AppState {
@@ -97,6 +124,8 @@ export interface AppState {
   imagePreview?: string;
   ocrText: string;
   ocrConfidence: number;
+  ocrProvider: string;
+  ocrSuccess: boolean;
   analysis?: AnalysisResponse;
   error?: string;
 }

@@ -18,22 +18,32 @@ export interface ExportSection {
 }
 
 export function buildExportDocument(
-  analysis: AnalysisResponse,
+  response: AnalysisResponse,
   format: "pdf" | "hwp"
 ): ExportDocument {
-  const { analysis: data, classification, disclaimer } = analysis;
+  if (response.status !== "complete" || !response.analysis || !response.classification) {
+    throw new Error("완료된 분석 결과만 내보낼 수 있습니다.");
+  }
+
+  const { analysis: data, classification, disclaimer, ocr } = response;
   const sections: ExportSection[] = [];
+
+  sections.push({
+    heading: "OCR 상태",
+    items: [
+      { label: "OCR 성공", value: ocr.success ? "성공" : "실패" },
+      { label: "OCR 신뢰도", value: `${ocr.confidence}%` },
+      { label: "OCR Provider", value: ocr.provider },
+    ],
+  });
 
   sections.push({
     heading: "지문 분류",
     items: [
       { label: "대분류", value: classification.category },
       { label: "세부 분류", value: classification.subCategory },
-      { label: "신뢰도", value: `${classification.confidence}%` },
+      { label: "분류 신뢰도", value: `${classification.confidence}%` },
       { label: "분류 근거", value: classification.reason },
-      ...(classification.isUncertain
-        ? [{ label: "상태", value: "분류 불확실 — 교사 검토 필요" }]
-        : []),
       ...classification.warnings.map((w, i) => ({
         label: `주의 ${i + 1}`,
         value: w,

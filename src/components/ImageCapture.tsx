@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 
 interface ImageCaptureProps {
-  onCapture: (file: File, preview: string) => void;
+  onCapture: (file: File) => void;
   isLoading: boolean;
 }
 
@@ -16,7 +16,7 @@ export function ImageCapture({ onCapture, isLoading }: ImageCaptureProps) {
     if (!file) return;
     const url = URL.createObjectURL(file);
     setPreview(url);
-    onCapture(file, url);
+    onCapture(file);
   };
 
   return (
@@ -24,7 +24,7 @@ export function ImageCapture({ onCapture, isLoading }: ImageCaptureProps) {
       <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
         <h2 className="mb-1 text-base font-semibold text-primary">지문 촬영 또는 업로드</h2>
         <p className="mb-4 text-sm text-muted">
-          교재, 문제집, 프린트, 시험지의 지문 부분을 촬영하세요.
+          교재, 문제집, 프린트, 시험지의 지문 부분을 촬영하세요. Google Cloud Vision OCR API 설정이 필요합니다.
         </p>
 
         {preview ? (

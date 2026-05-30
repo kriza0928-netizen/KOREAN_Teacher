@@ -10,8 +10,11 @@ export async function POST(request: NextRequest) {
     const analysis = body.analysis as AnalysisResponse;
     const format = (body.format as "pdf" | "hwp") ?? "pdf";
 
-    if (!analysis?.analysis) {
-      return NextResponse.json({ error: "분석 결과가 필요합니다." }, { status: 400 });
+    if (!analysis || analysis.status !== "complete" || !analysis.analysis) {
+      return NextResponse.json(
+        { error: "완료된 분석 결과만 내보낼 수 있습니다." },
+        { status: 400 }
+      );
     }
 
     const doc = buildExportDocument(analysis, format);

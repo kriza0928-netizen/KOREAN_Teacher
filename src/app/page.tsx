@@ -22,13 +22,15 @@ export default function HomePage() {
   const [step, setStep] = useState<Step>("capture");
   const [ocrText, setOcrText] = useState("");
   const [ocrConfidence, setOcrConfidence] = useState(0);
+  const [ocrProvider, setOcrProvider] = useState("");
+  const [ocrSuccess, setOcrSuccess] = useState(false);
   const [analysis, setAnalysis] = useState<AnalysisResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
 
-  const handleCapture = useCallback(async (file: File, _preview: string) => {
+  const handleCapture = useCallback(async (file: File) => {
     setError(null);
     setLoading(true);
     setLoadingMessage("OCR로 텍스트 추출 중...");
@@ -44,6 +46,8 @@ export default function HomePage() {
 
       setOcrText(data.text);
       setOcrConfidence(data.confidence);
+      setOcrProvider(data.provider);
+      setOcrSuccess(Boolean(data.success));
       setStep("edit");
     } catch (e) {
       setError(e instanceof Error ? e.message : "OCR 처리 오류");
@@ -55,13 +59,20 @@ export default function HomePage() {
   const handleAnalyze = useCallback(async () => {
     setError(null);
     setLoading(true);
-    setLoadingMessage("지문 분석 중... (10~30초)");
+    setLoadingMessage("OCR 검증 → 분류 → 분석 진행 중...");
 
     try {
       const res = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: ocrText }),
+        body: JSON.stringify({
+          text: ocrText,
+          ocr: {
+            success: ocrSuccess,
+            confidence: ocrConfidence,
+            provider: ocrProvider,
+          },
+        }),
       });
       const data = await res.json();
 
@@ -74,11 +85,11 @@ export default function HomePage() {
     } finally {
       setLoading(false);
     }
-  }, [ocrText]);
+  }, [ocrText, ocrConfidence, ocrProvider, ocrSuccess]);
 
   const handleExport = useCallback(
     async (format: "pdf" | "hwp") => {
-      if (!analysis) return;
+      if (!analysis || analysis.status !== "complete") return;
       setIsExporting(true);
       setError(null);
 
@@ -114,6 +125,8 @@ export default function HomePage() {
     setStep("capture");
     setOcrText("");
     setOcrConfidence(0);
+    setOcrProvider("");
+    setOcrSuccess(false);
     setAnalysis(null);
     setError(null);
   };
@@ -142,6 +155,7 @@ export default function HomePage() {
           <TextEditor
             text={ocrText}
             confidence={ocrConfidence}
+            ocrSuccess={ocrSuccess}
             onChange={setOcrText}
             onAnalyze={handleAnalyze}
             onBack={handleReset}

@@ -16,43 +16,113 @@ interface AnalysisResultProps {
   isExporting: boolean;
 }
 
+function OcrStatusBar({ result }: { result: AnalysisResponse }) {
+  const { ocr, classification } = result;
+
+  return (
+    <div className="grid grid-cols-3 gap-2 rounded-xl border border-border bg-white p-3 text-center shadow-sm">
+      <div>
+        <p className="text-xs text-muted">OCR 성공</p>
+        <p className={`mt-0.5 text-sm font-semibold ${ocr.success ? "text-success" : "text-red-600"}`}>
+          {ocr.success ? "성공" : "실패"}
+        </p>
+      </div>
+      <div>
+        <p className="text-xs text-muted">OCR 신뢰도</p>
+        <p className="mt-0.5 text-sm font-semibold text-primary">{ocr.confidence}%</p>
+      </div>
+      <div>
+        <p className="text-xs text-muted">분류 신뢰도</p>
+        <p className="mt-0.5 text-sm font-semibold text-primary">
+          {classification ? `${classification.confidence}%` : "—"}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function StatusMessage({ result, onReset }: { result: AnalysisResponse; onReset: () => void }) {
+  const titles: Record<string, string> = {
+    ocr_invalid: "OCR 실패",
+    text_insufficient: "텍스트 부족",
+    classification_deferred: "분류 보류",
+    classification_uncertain: "분류 불확실",
+    ai_unconfigured: "AI 분석 미설정",
+  };
+
+  return (
+    <div className="rounded-2xl border border-warning/30 bg-amber-50 p-5">
+      <h2 className="text-lg font-bold text-amber-900">
+        {titles[result.status] ?? "분석 중단"}
+      </h2>
+      {result.message && (
+        <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-amber-900/90">
+          {result.message}
+        </p>
+      )}
+      {result.classification && (
+        <div className="mt-3 rounded-lg bg-white/80 p-3 text-sm">
+          <p className="font-medium text-primary">
+            {result.classification.category} · {result.classification.subCategory}
+          </p>
+          <p className="mt-1 text-muted">{result.classification.reason}</p>
+        </div>
+      )}
+      <button
+        type="button"
+        onClick={onReset}
+        className="mt-4 w-full rounded-xl bg-primary py-3.5 text-sm font-semibold text-white"
+      >
+        다시 촬영하기
+      </button>
+    </div>
+  );
+}
+
 export function AnalysisResultView({
   result,
   onReset,
   onExport,
   isExporting,
 }: AnalysisResultProps) {
-  const { analysis, classification, disclaimer, ragContextUsed, ragSources } = result;
+  const { analysis, classification, disclaimer, ragContextUsed, ragSources, status } = result;
+  const isComplete = status === "complete" && analysis && classification;
+
+  if (!isComplete) {
+    return (
+      <div className="animate-fade-in space-y-4">
+        <OcrStatusBar result={result} />
+        <StatusMessage result={result} onReset={onReset} />
+        <DisclaimerBanner disclaimer={disclaimer} compact />
+      </div>
+    );
+  }
+
   const isLiterature = analysis.type === "literature";
-  const isUncertain = classification.isUncertain;
 
   return (
     <div className="animate-fade-in space-y-4">
+      <OcrStatusBar result={result} />
+
       <div
         className={`rounded-2xl p-4 text-white shadow-md ${
-          isUncertain
-            ? "bg-gradient-to-br from-warning to-amber-700"
-            : isLiterature
-              ? "bg-gradient-to-br from-literature to-purple-700"
-              : "bg-gradient-to-br from-non-literature to-teal-700"
+          isLiterature
+            ? "bg-gradient-to-br from-literature to-purple-700"
+            : "bg-gradient-to-br from-non-literature to-teal-700"
         }`}
       >
         <div className="flex items-start justify-between">
           <div>
             <p className="text-xs font-medium text-white/80">분류 결과</p>
             <h2 className="text-xl font-bold">
-              {isUncertain
-                ? "⚠️ 분류 불확실"
-                : isLiterature
-                  ? "📖 문학"
-                  : "📄 비문학"}
+              {isLiterature ? "📖 문학" : "📄 비문학"}
             </h2>
             <p className="mt-1 text-sm text-white/90">
               {classification.category} · {classification.subCategory}
             </p>
           </div>
           <span className="rounded-full bg-white/20 px-3 py-1 text-xs font-medium">
-            신뢰도 {classification.confidence}%
+            {classification.confidence}%
           </span>
         </div>
         <p className="mt-2 text-sm text-white/90">{classification.reason}</p>

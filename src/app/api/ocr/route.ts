@@ -1,10 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createOcrProvider } from "@/lib/ocr";
+import { isOcrConfigured } from "@/lib/ocr/validate";
 
 export const runtime = "nodejs";
 
 export async function POST(request: NextRequest) {
   try {
+    if (!isOcrConfigured()) {
+      return NextResponse.json(
+        {
+          error:
+            "OCR API가 설정되지 않았습니다. OCR_PROVIDER=google-vision과 GOOGLE_CLOUD_VISION_API_KEY를 설정하세요.",
+        },
+        { status: 503 }
+      );
+    }
+
     const formData = await request.formData();
     const file = formData.get("image") as File | null;
 
