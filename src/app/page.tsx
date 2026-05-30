@@ -1,23 +1,31 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import type { AnalysisResponse } from "@/types";
+import type { AnalysisResponse, ManualSourceInput } from "@/types";
 import { Header } from "@/components/Header";
 import { ImageCapture } from "@/components/ImageCapture";
+import { TextEditor } from "@/components/TextEditor";
 import { AnalysisResultView } from "@/components/AnalysisResult";
 import { LoadingOverlay } from "@/components/LoadingOverlay";
 import { DisclaimerBanner } from "@/components/DisclaimerBanner";
 import { DEFAULT_DISCLAIMER } from "@/lib/rag";
+import { runTesseractOcr } from "@/lib/ocr/tesseract-browser";
 
-type Step = "capture" | "result";
+type Step = "capture" | "edit" | "result";
 
 const STEP_INDEX: Record<Step, number> = {
   capture: 0,
-  result: 1,
+  edit: 1,
+  result: 2,
 };
 
 export default function HomePage() {
   const [step, setStep] = useState<Step>("capture");
+  const [ocrText, setOcrText] = useState("");
+  const [ocrConfidence, setOcrConfidence] = useState(0);
+  const [ocrProvider, setOcrProvider] = useState("tesseract.js");
+  const [ocrSuccess, setOcrSuccess] = useState(false);
+  const [manualSource, setManualSource] = useState<ManualSourceInput>({});
   const [analysis, setAnalysis] = useState<AnalysisResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState("");
@@ -27,13 +35,45 @@ export default function HomePage() {
   const handleCapture = useCallback(async (file: File) => {
     setError(null);
     setLoading(true);
-    setLoadingMessage("GPT-4o Vision으로 추출·분류·분석 중... (30~60초)");
+    setLoadingMessage("Tesseract.js로 한글 OCR 중... (1~2분)");
 
     try {
-      const formData = new FormData();
-      formData.append("image", file);
+      const result = await runTesseractOcr(file, (p) => {
+        setLoadingMessage(`한글 OCR 진행 중... ${p}%`);
+      });
 
-      const res = await fetch("/api/analyze", { method: "POST", body: formData });
+      setOcrText(result.text);
+      setOcrConfidence(result.confidence);
+      setOcrProvider(result.provider);
+      setOcrSuccess(result.success);
+      setManualSource({});
+      setStep("edit");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "OCR 처리 오류");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const handleAnalyze = useCallback(async () => {
+    setError(null);
+    setLoading(true);
+    setLoadingMessage("규칙 기반 자동 분석 초안 생성 중...");
+
+    try {
+      const res = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: ocrText,
+          ocr: {
+            success: ocrSuccess,
+            confidence: ocrConfidence,
+            provider: ocrProvider,
+          },
+          manualSource,
+        }),
+      });
       const data = await res.json();
 
       if (!res.ok) throw new Error(data.error ?? "분석 실패");
@@ -45,7 +85,7 @@ export default function HomePage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [ocrText, ocrConfidence, ocrProvider, ocrSuccess, manualSource]);
 
   const handleExport = useCallback(
     async (format: "pdf" | "hwp") => {
@@ -83,13 +123,18 @@ export default function HomePage() {
 
   const handleReset = () => {
     setStep("capture");
+    setOcrText("");
+    setOcrConfidence(0);
+    setOcrProvider("tesseract.js");
+    setOcrSuccess(false);
+    setManualSource({});
     setAnalysis(null);
     setError(null);
   };
 
   return (
     <div className="min-h-dvh bg-background">
-      <Header step={STEP_INDEX[step]} totalSteps={2} />
+      <Header step={STEP_INDEX[step]} totalSteps={3} />
 
       <main className="mx-auto max-w-lg px-4 py-4 safe-bottom">
         {error && (
@@ -107,9 +152,24 @@ export default function HomePage() {
           </>
         )}
 
+        {step === "edit" && (
+          <TextEditor
+            text={ocrText}
+            confidence={ocrConfidence}
+            ocrSuccess={ocrSuccess}
+            manualSource={manualSource}
+            onManualSourceChange={setManualSource}
+            onChange={setOcrText}
+            onAnalyze={handleAnalyze}
+            onBack={handleReset}
+            isLoading={loading}
+          />
+        )}
+
         {step === "result" && analysis && (
           <AnalysisResultView
             result={analysis}
+            onResultChange={setAnalysis}
             onReset={handleReset}
             onExport={handleExport}
             isExporting={isExporting}

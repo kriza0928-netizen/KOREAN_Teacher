@@ -24,7 +24,7 @@ export function ImageCapture({ onCapture, isLoading }: ImageCaptureProps) {
       <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
         <h2 className="mb-1 text-base font-semibold text-primary">지문 촬영 또는 업로드</h2>
         <p className="mb-4 text-sm text-muted">
-          교재, 문제집, 프린트, 시험지의 지문을 촬영하세요. GPT-4o Vision이 텍스트 추출·분류·분석을 한 번에 처리합니다.
+          교재, 문제집, 프린트, 시험지의 지문을 촬영하세요. 브라우저에서 Tesseract.js로 한글 OCR 후 규칙 기반 분석 초안을 생성합니다. (API 키 불필요)
         </p>
 
         {preview ? (

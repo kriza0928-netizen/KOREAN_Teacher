@@ -1,10 +1,11 @@
 import type { AnalysisResponse, AnalysisStatus, OcrMeta } from "@/types";
 import { DEFAULT_DISCLAIMER } from "@/lib/rag";
+import { TESSERACT_PROVIDER } from "@/lib/providers/ocr/types";
 
-export const VISION_PROVIDER = "gpt-4o-vision";
+export { TESSERACT_PROVIDER };
 
-export const MIN_TEXT_LENGTH = 200;
-export const MIN_OCR_CONFIDENCE_PERCENT = 80;
+export const MIN_TEXT_LENGTH = 50;
+export const MIN_OCR_CONFIDENCE_PERCENT = 40;
 export const MIN_CLASSIFICATION_CONFIDENCE = 75;
 
 export const INSUFFICIENT_TEXT_MESSAGE =
@@ -17,6 +18,8 @@ export interface ExtractionValidationInput {
   provider: string;
 }
 
+const VALID_PROVIDERS = [TESSERACT_PROVIDER, "google-vision", "gpt-4o-vision"];
+
 export function normalizeExtractionConfidencePercent(confidence: number): number {
   if (confidence <= 1) {
     return Math.round(confidence * 100);
@@ -24,12 +27,8 @@ export function normalizeExtractionConfidencePercent(confidence: number): number
   return Math.round(confidence);
 }
 
-export function isRealVisionProvider(provider: string): boolean {
-  return provider === VISION_PROVIDER;
-}
-
-export function isRealOcrProvider(provider: string): boolean {
-  return isRealVisionProvider(provider);
+export function isValidOcrProvider(provider: string): boolean {
+  return VALID_PROVIDERS.includes(provider);
 }
 
 export function buildOcrMeta(input: {
@@ -38,7 +37,7 @@ export function buildOcrMeta(input: {
   provider: string;
 }): OcrMeta {
   return {
-    success: input.success && isRealVisionProvider(input.provider),
+    success: input.success && isValidOcrProvider(input.provider),
     confidence: normalizeExtractionConfidencePercent(input.confidence),
     provider: input.provider,
   };
@@ -53,6 +52,8 @@ function buildBlockedResponse(
     status,
     message,
     ocr,
+    isDraft: false,
+    analysisProvider: "rule-based",
     disclaimer: DEFAULT_DISCLAIMER,
     ragContextUsed: false,
     ragSources: [],
@@ -65,10 +66,10 @@ export function validatePreClassification(
   const ocr = buildOcrMeta(input);
   const text = input.text.trim();
 
-  if (!input.success || !isRealVisionProvider(input.provider) || !text) {
+  if (!input.success || !isValidOcrProvider(input.provider) || !text) {
     return buildBlockedResponse(
       "ocr_invalid",
-      "텍스트 추출에 실패했습니다. 지문이 선명하게 보이도록 다시 촬영해 주세요.",
+      "텍스트 추출에 실패했습니다. 지문이 선명하게 보이도록 다시 촬영하거나 텍스트를 직접 입력해 주세요.",
       { ...ocr, success: false }
     );
   }
@@ -77,25 +78,5 @@ export function validatePreClassification(
     return buildBlockedResponse("text_insufficient", INSUFFICIENT_TEXT_MESSAGE, ocr);
   }
 
-  if (ocr.confidence < MIN_OCR_CONFIDENCE_PERCENT) {
-    return buildBlockedResponse(
-      "classification_deferred",
-      "텍스트 추출 신뢰도가 80% 미만입니다. 분류 보류 — 지문을 더 선명하게 다시 촬영해 주세요.",
-      ocr
-    );
-  }
-
   return null;
-}
-
-export function isAiConfigured(): boolean {
-  return Boolean(process.env.OPENAI_API_KEY);
-}
-
-export function isOcrConfigured(): boolean {
-  return isAiConfigured();
-}
-
-export function isVisionConfigured(): boolean {
-  return isAiConfigured();
 }

@@ -90,6 +90,12 @@ export interface NonLiteratureAnalysis {
 
 export type AnalysisResult = LiteratureAnalysis | NonLiteratureAnalysis;
 
+export interface ManualSourceInput {
+  title?: string;
+  author?: string;
+  source?: string;
+}
+
 export interface AnalysisResponse {
   status: AnalysisStatus;
   message?: string;
@@ -99,6 +105,8 @@ export interface AnalysisResponse {
   textType?: TextType;
   confidence?: number;
   analysis?: AnalysisResult;
+  isDraft: boolean;
+  analysisProvider: string;
   disclaimer: Disclaimer;
   ragContextUsed: boolean;
   ragSources: string[];
@@ -118,6 +126,7 @@ export interface AnalyzeRequest {
     confidence: number;
     provider: string;
   };
+  manualSource?: ManualSourceInput;
 }
 
 export interface AppState {

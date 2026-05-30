@@ -40,7 +40,35 @@ export function LabelValue({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function BulletList({ items }: { items: string[] }) {
+export function BulletList({
+  items,
+  editable,
+  onChange,
+}: {
+  items: string[];
+  editable?: boolean;
+  onChange?: (items: string[]) => void;
+}) {
+  if (editable && onChange) {
+    return (
+      <ul className="space-y-2">
+        {items.map((item, i) => (
+          <li key={i}>
+            <input
+              value={item}
+              onChange={(e) => {
+                const next = [...items];
+                next[i] = e.target.value;
+                onChange(next);
+              }}
+              className="w-full rounded-lg border border-border bg-white px-2 py-1.5 text-sm"
+            />
+          </li>
+        ))}
+      </ul>
+    );
+  }
+
   return (
     <ul className="space-y-1.5">
       {items.map((item, i) => (

@@ -91,6 +91,8 @@ export const DEFAULT_DISCLAIMER = {
 export function buildAnalysisResponse(
   partial: Omit<AnalysisResponse, "disclaimer"> & {
     disclaimer?: Disclaimer;
+    isDraft?: boolean;
+    analysisProvider?: string;
   }
 ): AnalysisResponse {
   return {
@@ -98,5 +100,7 @@ export function buildAnalysisResponse(
     disclaimer: partial.disclaimer ?? DEFAULT_DISCLAIMER,
     ragContextUsed: partial.ragContextUsed ?? false,
     ragSources: partial.ragSources ?? [],
+    isDraft: partial.isDraft ?? false,
+    analysisProvider: partial.analysisProvider ?? "rule-based",
   };
 }
