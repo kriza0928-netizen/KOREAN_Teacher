@@ -17,6 +17,7 @@ export async function analyzeWithRules(input: AnalyzeInput): Promise<AnalysisRes
     success: input.ocr.success,
     confidence: input.ocr.confidence,
     provider: input.ocr.provider,
+    textManuallyVerified: input.textManuallyVerified,
   });
 
   if (preCheck) {

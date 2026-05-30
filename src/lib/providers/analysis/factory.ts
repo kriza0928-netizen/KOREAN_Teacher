@@ -17,6 +17,7 @@ export interface AnalyzeInput {
     author?: string;
     source?: string;
   };
+  textManuallyVerified?: boolean;
 }
 
 /** 유료 — OpenAI Vision 통합 분석 (추후 연동) */

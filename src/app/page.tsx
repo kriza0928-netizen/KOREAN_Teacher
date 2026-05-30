@@ -10,6 +10,10 @@ import { LoadingOverlay } from "@/components/LoadingOverlay";
 import { DisclaimerBanner } from "@/components/DisclaimerBanner";
 import { DEFAULT_DISCLAIMER } from "@/lib/rag";
 import { runTesseractOcr } from "@/lib/ocr/tesseract-browser";
+import {
+  LOW_OCR_CONFIDENCE_MESSAGE,
+  MIN_OCR_CONFIDENCE_PERCENT,
+} from "@/lib/validation/text";
 
 type Step = "capture" | "edit" | "result";
 
@@ -22,9 +26,11 @@ const STEP_INDEX: Record<Step, number> = {
 export default function HomePage() {
   const [step, setStep] = useState<Step>("capture");
   const [ocrText, setOcrText] = useState("");
+  const [initialOcrText, setInitialOcrText] = useState("");
   const [ocrConfidence, setOcrConfidence] = useState(0);
   const [ocrProvider, setOcrProvider] = useState("tesseract.js");
   const [ocrSuccess, setOcrSuccess] = useState(false);
+  const [ocrLowConfidence, setOcrLowConfidence] = useState(false);
   const [manualSource, setManualSource] = useState<ManualSourceInput>({});
   const [analysis, setAnalysis] = useState<AnalysisResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -35,18 +41,29 @@ export default function HomePage() {
   const handleCapture = useCallback(async (file: File) => {
     setError(null);
     setLoading(true);
-    setLoadingMessage("Tesseract.js로 한글 OCR 중... (1~2분)");
+    setLoadingMessage("이미지 전처리 및 OCR 준비 중...");
 
     try {
-      const result = await runTesseractOcr(file, (p) => {
-        setLoadingMessage(`한글 OCR 진행 중... ${p}%`);
+      const result = await runTesseractOcr(file, {
+        onProgress: (progress, message) => {
+          setLoadingMessage(message ?? `OCR 진행 중... ${progress}%`);
+        },
       });
 
       setOcrText(result.text);
+      setInitialOcrText(result.text);
       setOcrConfidence(result.confidence);
       setOcrProvider(result.provider);
       setOcrSuccess(result.success);
+      setOcrLowConfidence(
+        result.lowConfidence ?? result.confidence < MIN_OCR_CONFIDENCE_PERCENT
+      );
       setManualSource({});
+
+      if (result.lowConfidence ?? result.confidence < MIN_OCR_CONFIDENCE_PERCENT) {
+        setError(LOW_OCR_CONFIDENCE_MESSAGE);
+      }
+
       setStep("edit");
     } catch (e) {
       setError(e instanceof Error ? e.message : "OCR 처리 오류");
@@ -55,7 +72,15 @@ export default function HomePage() {
     }
   }, []);
 
+  const textManuallyVerified =
+    ocrText.trim() !== initialOcrText.trim() && ocrText.trim().length > 0;
+
   const handleAnalyze = useCallback(async () => {
+    if (ocrLowConfidence && !textManuallyVerified) {
+      setError(LOW_OCR_CONFIDENCE_MESSAGE);
+      return;
+    }
+
     setError(null);
     setLoading(true);
     setLoadingMessage("규칙 기반 자동 분석 초안 생성 중...");
@@ -67,16 +92,24 @@ export default function HomePage() {
         body: JSON.stringify({
           text: ocrText,
           ocr: {
-            success: ocrSuccess,
+            success: ocrSuccess || textManuallyVerified,
             confidence: ocrConfidence,
             provider: ocrProvider,
           },
           manualSource,
+          textManuallyVerified,
         }),
       });
       const data = await res.json();
 
       if (!res.ok) throw new Error(data.error ?? "분석 실패");
+
+      if (data.status !== "complete") {
+        setError(data.message ?? "분석을 진행할 수 없습니다.");
+        setAnalysis(data);
+        setStep("result");
+        return;
+      }
 
       setAnalysis(data);
       setStep("result");
@@ -85,7 +118,15 @@ export default function HomePage() {
     } finally {
       setLoading(false);
     }
-  }, [ocrText, ocrConfidence, ocrProvider, ocrSuccess, manualSource]);
+  }, [
+    ocrText,
+    ocrConfidence,
+    ocrProvider,
+    ocrSuccess,
+    manualSource,
+    ocrLowConfidence,
+    textManuallyVerified,
+  ]);
 
   const handleExport = useCallback(
     async (format: "pdf" | "hwp") => {
@@ -124,9 +165,11 @@ export default function HomePage() {
   const handleReset = () => {
     setStep("capture");
     setOcrText("");
+    setInitialOcrText("");
     setOcrConfidence(0);
     setOcrProvider("tesseract.js");
     setOcrSuccess(false);
+    setOcrLowConfidence(false);
     setManualSource({});
     setAnalysis(null);
     setError(null);
@@ -155,8 +198,10 @@ export default function HomePage() {
         {step === "edit" && (
           <TextEditor
             text={ocrText}
+            initialText={initialOcrText}
             confidence={ocrConfidence}
             ocrSuccess={ocrSuccess}
+            ocrLowConfidence={ocrLowConfidence}
             manualSource={manualSource}
             onManualSourceChange={setManualSource}
             onChange={setOcrText}

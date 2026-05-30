@@ -7,6 +7,9 @@ export interface OcrResult {
   confidence: number;
   provider: string;
   success: boolean;
+  psm?: number;
+  preprocessed?: boolean;
+  lowConfidence?: boolean;
 }
 
 export interface OcrProvider {

@@ -127,6 +127,8 @@ export interface AnalyzeRequest {
     provider: string;
   };
   manualSource?: ManualSourceInput;
+  /** OCR 신뢰도가 낮을 때 사용자가 텍스트를 직접 수정·입력한 경우 */
+  textManuallyVerified?: boolean;
 }
 
 export interface AppState {

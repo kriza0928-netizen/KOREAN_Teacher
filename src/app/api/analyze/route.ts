@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as AnalyzeRequest;
-    const { text, ocr, manualSource } = body;
+    const { text, ocr, manualSource, textManuallyVerified } = body;
 
     if (!text || typeof text !== "string") {
       return NextResponse.json({ error: "분석할 텍스트가 필요합니다." }, { status: 400 });
@@ -26,6 +26,7 @@ export async function POST(request: NextRequest) {
         provider: ocr.provider,
       },
       manualSource,
+      textManuallyVerified: Boolean(textManuallyVerified),
     });
 
     return NextResponse.json(result);

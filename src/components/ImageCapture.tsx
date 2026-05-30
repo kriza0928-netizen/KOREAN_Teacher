@@ -24,7 +24,7 @@ export function ImageCapture({ onCapture, isLoading }: ImageCaptureProps) {
       <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
         <h2 className="mb-1 text-base font-semibold text-primary">지문 촬영 또는 업로드</h2>
         <p className="mb-4 text-sm text-muted">
-          교재, 문제집, 프린트, 시험지의 지문을 촬영하세요. 브라우저에서 Tesseract.js로 한글 OCR 후 규칙 기반 분석 초안을 생성합니다. (API 키 불필요)
+          교재·시험지 지문을 촬영하면 전처리(흑백·대비·크롭·확대) 후 Tesseract.js(kor+eng) OCR을 수행합니다.
         </p>
 
         {preview ? (
@@ -77,8 +77,24 @@ export function ImageCapture({ onCapture, isLoading }: ImageCaptureProps) {
         />
       </div>
 
-      <div className="rounded-xl bg-white/60 p-3 text-xs text-muted">
-        <p>💡 팁: 지문만 선명하게, 그림자 없이 촬영하면 OCR 정확도가 높아집니다.</p>
+      <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900">
+        <p className="font-semibold">📷 촬영 시 OCR 정확도를 높이려면</p>
+        <ul className="space-y-1 pl-1">
+          <li>• 지문만 선명하게, 그림자 없이 수평으로 촬영하세요.</li>
+          <li>• 밝은 배경 위 검은 글씨가 가장 잘 인식됩니다.</li>
+        </ul>
+      </div>
+
+      <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-xs text-red-800">
+        <p className="font-semibold">⚠️ OCR 실패 가능성이 높은 경우</p>
+        <ul className="mt-2 space-y-1 pl-1">
+          <li>• <strong>배경 이미지 위의 흰 글씨</strong> — 대비가 낮아 인식률이 크게 떨어집니다.</li>
+          <li>• <strong>기울어진 사진</strong> — 텍스트 영역이 왜곡되어 오인식이 많습니다.</li>
+          <li>• <strong>작은 글씨</strong> — 확대·전처리 후에도 정확도가 낮을 수 있습니다.</li>
+        </ul>
+        <p className="mt-2">
+          위 경우에는 OCR 후 텍스트를 직접 수정·붙여넣기하거나, 선명한 사진으로 다시 촬영해 주세요.
+        </p>
       </div>
     </div>
   );
