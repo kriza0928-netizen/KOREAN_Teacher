@@ -10,7 +10,6 @@ import {
   TOP_MATCH_COUNT,
   type WorkSearchMatch,
   type WorkSearchResult,
-  type WorkSelection,
   type LiteratureWork,
 } from "@/lib/literature/types";
 
@@ -49,31 +48,7 @@ function toWorkSearchMatch(item: ReturnType<typeof scoreWorkMatch>): WorkSearchM
   };
 }
 
-export function getWorkById(workId: string): LiteratureWork | undefined {
-  return db.works.find((w) => w.id === workId);
-}
-
-export function enrichWorkSelection(match: WorkSearchMatch): WorkSelection {
-  const work = getWorkById(match.workId);
-  const theme =
-    work?.themes?.join(", ") ??
-    work?.theme ??
-    match.matchReasons.find((r) => r.label === "핵심어")?.matchedTerm;
-
-  return {
-    mode: "db",
-    workId: match.workId,
-    title: match.title,
-    author: match.author,
-    source: match.source ?? work?.source,
-    genre: work?.genre ?? match.genre,
-    era: work?.era,
-    theme,
-    textbookGuide: work?.textbookGuide,
-    matchScore: match.score,
-    matchReasons: match.matchReasons,
-  };
-}
+export { getWorkById, enrichWorkSelection } from "@/lib/literature/enrich-work-selection";
 
 export function searchLiteratureWorks(
   text: string,

@@ -64,8 +64,14 @@ export function DetailedAnalysisReport({ report, onChange }: DetailedAnalysisRep
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-2 text-xs text-primary">
-        분석 분량: 약 {report.totalCharCount.toLocaleString()}자 · v{report.version} · 선택 작품 DB 기준 심층 분석
+        분석 분량: 약 {report.totalCharCount.toLocaleString()}자 · v{report.version} · 작품 DB 기반 교사용 해설
       </div>
+
+      {report.ocrQualityNotice && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          {report.ocrQualityNotice}
+        </div>
+      )}
 
       {/* 1. 작품 기본 정보 */}
       <AnalysisCard title="1. 작품 기본 정보" icon="📚" variant={isLiterature ? "literature" : "non-literature"}>

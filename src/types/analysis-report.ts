@@ -153,6 +153,10 @@ export interface TeacherAnalysisReport {
   teacherComments: TeacherComments;
   copyrightNotice: CopyrightNotice;
   sourceCandidates: SourceCandidate[];
+  /** OCR 품질이 낮을 때 표시 */
+  ocrQualityNotice?: string;
+  /** 분석 생성 방식 안내 */
+  analysisMode?: "work_db_commentary" | "mixed";
   /** 생성된 전체 텍스트 분량 (검증용) */
   totalCharCount: number;
 }

@@ -49,7 +49,11 @@ export async function analyzeWithRules(input: AnalyzeInput): Promise<AnalysisRes
   const classification = classifyText(trimmed);
   const textType = classificationToTextType(classification);
 
-  const analysis = generateDeepAnalysis(trimmed, classification, input.selectedWork);
+  const analysis = generateDeepAnalysis(trimmed, classification, input.selectedWork, {
+    confidence: input.ocr.confidence,
+    success: input.ocr.success,
+    textManuallyVerified: input.textManuallyVerified,
+  });
 
   return buildAnalysisResponse({
     status: "complete",

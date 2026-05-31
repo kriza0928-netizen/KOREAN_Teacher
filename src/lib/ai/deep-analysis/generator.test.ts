@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { classifyText } from "@/lib/ai/classify";
 import { generateDeepAnalysis } from "@/lib/ai/deep-analysis/generator";
+import { containsOcrVerbatim } from "@/lib/ai/deep-analysis/sanitize-output";
 import { enrichWorkSelection } from "@/lib/literature/search";
 import { searchLiteratureWorks } from "@/lib/literature/search";
 
@@ -11,6 +12,11 @@ const UNSO_OCR = `
 왜 먹지를 못하니 하고 말했다.
 `.trim();
 
+const NIM_OCR = `님슨 갔습니다
+탄나루 숲슬 향하여
+작슨 길
+미에`;
+
 describe("generateDeepAnalysis", () => {
   it("운수 좋은 날 지문에 대해 3000자 이상 심층 분석을 생성한다", () => {
     const search = searchLiteratureWorks(UNSO_OCR);
@@ -19,16 +25,42 @@ describe("generateDeepAnalysis", () => {
 
     const selected = enrichWorkSelection(top);
     const classification = classifyText(UNSO_OCR);
-    const report = generateDeepAnalysis(UNSO_OCR, classification, selected);
+    const report = generateDeepAnalysis(UNSO_OCR, classification, selected, {
+      confidence: 85,
+      success: true,
+    });
 
     expect(report.version).toBe("2.0");
     expect(report.type).toBe("literature");
+    expect(report.analysisMode).toBe("work_db_commentary");
     expect(report.basicInfo.title).toBe("운수 좋은 날");
     expect(report.literatureAnalysis).toBeDefined();
     expect(report.modernNovelAnalysis).toBeDefined();
     expect(report.examMaterials.multipleChoice).toHaveLength(5);
     expect(report.examMaterials.shortAnswer).toHaveLength(5);
     expect(report.totalCharCount).toBeGreaterThanOrEqual(3000);
+    expect(containsOcrVerbatim(report.passageSummary.overallSummary, UNSO_OCR)).toBe(false);
+    expect(containsOcrVerbatim(report.passageSummary.sceneDescription, UNSO_OCR)).toBe(false);
+  });
+
+  it("님의 침묵 OCR 오류가 있어도 작품 DB 해설 중심으로 분석한다", () => {
+    const search = searchLiteratureWorks(NIM_OCR);
+    const selected = enrichWorkSelection(search.matches[0]!);
+    const classification = classifyText(NIM_OCR);
+
+    const report = generateDeepAnalysis(NIM_OCR, classification, selected, {
+      confidence: 40,
+      success: false,
+    });
+
+    expect(report.basicInfo.title).toBe("님의 침묵");
+    expect(report.ocrQualityNotice).toContain("OCR 품질이 낮아");
+    expect(report.passageSummary.overallSummary).toContain("그리움");
+    expect(report.passageSummary.sceneDescription).toContain("이별");
+    expect(report.literatureAnalysis?.themeConsciousness).toContain("희망");
+    expect(containsOcrVerbatim(report.passageSummary.overallSummary, NIM_OCR)).toBe(false);
+    expect(containsOcrVerbatim(report.passageSummary.sceneDescription, NIM_OCR)).toBe(false);
+    expect(report.passageSummary.overallSummary).not.toMatch(/[※@|^=<>~`\\]/);
   });
 
   it("비문학 지문에 대해 1500자 이상 비문학 분석을 생성한다", () => {
@@ -52,5 +84,6 @@ describe("generateDeepAnalysis", () => {
     expect(report.type).toBe("non_literature");
     expect(report.nonLiteratureAnalysis).toBeDefined();
     expect(report.totalCharCount).toBeGreaterThanOrEqual(3000);
+    expect(containsOcrVerbatim(report.nonLiteratureAnalysis!.centralTopic, nonLitText)).toBe(false);
   });
 });

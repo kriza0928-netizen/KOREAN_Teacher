@@ -17,14 +17,24 @@ import type {
 } from "@/types/analysis-report";
 import {
   countReportChars,
-  detectTextSignals,
-  extractKeywordsFromText,
-  extractSentences,
-  extractShortQuotes,
-  inferParagraphSummaries,
   joinSections,
 } from "@/lib/ai/deep-analysis/text-extract";
 import { findWorkProfile } from "@/lib/ai/deep-analysis/work-profiles";
+import type { OcrQualityInput } from "@/lib/ai/deep-analysis/sanitize-output";
+import {
+  assessOcrQuality,
+  OCR_LOW_QUALITY_NOTICE,
+  sanitizeReportValue,
+} from "@/lib/ai/deep-analysis/sanitize-output";
+import {
+  buildImportantParts,
+  buildTeacherOverallSummary,
+  buildTeacherSceneDescription,
+  buildTeacherTheme,
+  buildWorkAnalysisContext,
+} from "@/lib/ai/deep-analysis/work-context";
+
+export type GenerateDeepAnalysisOptions = OcrQualityInput;
 
 const MIN_LIT_CHARS = 1500;
 const MIN_NONLIT_CHARS = 1500;
@@ -94,34 +104,17 @@ function inferDifficulty(classification: TextClassification, genre: string): str
   return "중";
 }
 
-function buildPassageSummary(
-  text: string,
-  selected: WorkSelection,
-  profile?: ReturnType<typeof findWorkProfile>
-): PassageSummary {
-  const sentences = extractSentences(text, 6);
-  const keywords = extractKeywordsFromText(text, 2, 6).slice(0, 8);
-  const guide = selected.textbookGuide ?? "";
-  const matchTerms =
-    selected.matchReasons
-      ?.slice(0, 5)
-      .map((r) => r.matchedTerm)
-      .filter(Boolean) ?? [];
+function buildPassageSummary(ctx: ReturnType<typeof buildWorkAnalysisContext>): PassageSummary {
+  const { selected, profile, lowOcrQuality } = ctx;
+  const guide = ctx.guide;
+  const theme = buildTeacherTheme(ctx);
 
   const overallSummary = joinSections([
-    `「${selected.title}」(${selected.author}) 지문 분석입니다. ${guide}`,
-    sentences.length > 0
-      ? `OCR 추출 지문에 따르면, ${sentences.slice(0, 3).join(" ")}`
-      : "OCR 지문에서 핵심 문장을 추출하여 전체 내용을 파악한다.",
-    `선택 작품 DB 해설과 대조하여, 이 지문이 작품 전체에서 담당하는 기능을 파악하는 것이 수업·시험 준비의 핵심입니다.`,
+    lowOcrQuality ? OCR_LOW_QUALITY_NOTICE : undefined,
+    buildTeacherOverallSummary(ctx),
   ]);
 
-  const sceneDescription = joinSections([
-    `이 지문에서 드러나는 장면·상황: ${sentences[0] ?? "지문 도입부의 상황을 학생과 함께 정리한다."}`,
-    keywords.length > 0 ? `핵심 어휘·소재: ${keywords.join(", ")}` : "",
-    matchTerms.length > 0 ? `작품 DB 매칭 근거: ${matchTerms.join(", ")}` : "",
-    selected.theme ? `작품 주제와 연결: ${selected.theme}` : "",
-  ]);
+  const sceneDescription = buildTeacherSceneDescription(ctx);
 
   return {
     overallSummary,
@@ -129,55 +122,46 @@ function buildPassageSummary(
     contextBeforeAfter:
       profile?.contextBeforeAfter ??
       joinSections([
-        `앞맥락: 「${selected.title}」의 앞부분에서는 작품의 배경·인물·갈등이 제시된다. ${guide.slice(0, 80)}`,
-        `뒷맥락: 이후 전개에서는 주제와 정서가 심화·정리된다. 지문의 위치에 따라 정서 변화·주제 압축 여부를 확인한다.`,
+        `앞맥락: 「${selected.title}」의 앞부분에서는 작품의 배경·정서·핵심 소재가 제시된다. ${guide.slice(0, 100)}`,
+        `뒷맥락: 이후 전개에서는 주제(${theme})와 정서가 심화·정리된다. 지문의 위치에 따라 정서 변화·주제 압축 여부를 확인한다.`,
       ]),
-    importantParts:
-      sentences.length > 0
-        ? sentences.slice(0, 4).map((s, i) => `[핵심 ${i + 1}] ${s}`)
-        : [
-            "지문 도입부의 상황 설정",
-            "핵심 정서·주제가 드러나는 부분",
-            "표현상 특징이 두드러지는 구절",
-          ],
+    importantParts: buildImportantParts(ctx),
   };
 }
 
 function buildLiteratureAnalysis(
-  text: string,
-  selected: WorkSelection,
-  classification: TextClassification,
-  profile?: ReturnType<typeof findWorkProfile>
+  ctx: ReturnType<typeof buildWorkAnalysisContext>,
+  classification: TextClassification
 ): LiteratureDetailedAnalysis {
-  const signals = detectTextSignals(text);
-  const guide = selected.textbookGuide ?? "";
-  const theme = selected.theme ?? "주제는 지문·작품 전체와 교과서 해설을 종합하여 파악";
-  const keywords = extractKeywordsFromText(text).slice(0, 6);
+  const { selected, profile, guide, keywords, emotions, symbols } = ctx;
+  const theme = buildTeacherTheme(ctx);
   const base = profile?.literature ?? {};
 
   return {
     speaker:
       base.speaker ??
       joinSections([
-        signals.hasFirstPerson
-          ? "1인칭 화자 또는 1인칭 서술자가 등장한다. 화자/서술자의 시각에서 정서와 태도를 파악한다."
-          : "3인칭 서술자 또는 관찰자 시점으로 서술될 가능성이 높다. 서술자의 시점과 인물의 심리를 구분한다.",
-        `「${selected.title}」(${selected.genre ?? classification.subCategory})의 화자·서술자 특성을 교과서 해설과 대조한다.`,
+        /시/.test(ctx.genre)
+          ? "1인칭 화자의 정서와 태도를 중심으로 작품을 감상한다."
+          : "서술자·인물의 시각과 태도를 구분하여 지문을 읽는다.",
+        `「${selected.title}」(${ctx.genre ?? classification.subCategory})의 화자·서술자 특성을 교과서 해설과 대조한다.`,
       ]),
     centralSubject:
       base.centralSubject ??
       joinSections([
-        `중심 대상: ${keywords.slice(0, 3).join(", ") || "지문의 핵심 인물·대상"}`,
+        `중심 대상: ${keywords.slice(0, 3).join(", ") || symbols.slice(0, 2).join(", ") || "작품의 핵심 인물·대상"}`,
         guide ? `DB 해설: ${guide}` : "",
       ]),
     situation:
-      base.situation ??
-      `「${selected.title}」 지문의 시적·서사적 상황. ${extractSentences(text, 2)[0] ?? "지문을 시간 순서대로 정리한다."}`,
+      base.situation ?? buildTeacherSceneDescription(ctx),
     emotionAndAttitude:
       base.emotionAndAttitude ??
-      (signals.hasEmotion
-        ? "지문에 그리움·슬픔·애정·허무 등 정서적 어휘가 나타난다. 화자/인물의 정서 변화를 단계별로 정리한다."
-        : `교과서 해설(${guide.slice(0, 60)}…)과 OCR 지문을 대조하여 정서·태도를 파악한다.`),
+      joinSections([
+        emotions.length > 0
+          ? `대표 정서: ${emotions.join(", ")}`
+          : "작품 DB·교과서 해설을 바탕으로 정서·태도를 정리한다.",
+        guide ? `교과서 해설: ${guide.slice(0, 120)}` : "",
+      ]),
     themeConsciousness: base.themeConsciousness ?? theme,
     conflictStructure:
       base.conflictStructure ??
@@ -188,21 +172,21 @@ function buildLiteratureAnalysis(
     expressionFeatures:
       base.expressionFeatures ??
       joinSections([
-        signals.hasMetaphor
-          ? "비유·상징적 표현이 확인된다."
-          : "갈래에 따른 표현법(운율·서사·묘사·대화)을 지문에서 찾는다.",
-        `「${selected.title}」의 대표적 표현 특징을 DB 해설과 연결한다.`,
+        symbols.length > 0
+          ? `상징·비유: ${symbols.join(", ")} 등의 소재가 주제·정서와 연결된다.`
+          : "갈래에 따른 표현법(운율·서사·묘사·대화)을 작품 DB 해설과 연결한다.",
+        `「${selected.title}」의 대표적 표현 특징을 교과서 해설과 연결한다.`,
       ]),
     symbolicMaterials:
       base.symbolicMaterials ??
-      (keywords.length > 0
-        ? `핵심 소재·상징 후보: ${keywords.join(", ")}. 각 소재가 주제·정서와 어떻게 연결되는지 분석한다.`
-        : "지문의 핵심 소재·시어를 상징으로 읽는 연습을 한다."),
+      (symbols.length > 0
+        ? `핵심 소재·상징: ${symbols.join(", ")}. 각 소재가 주제·정서와 어떻게 연결되는지 분석한다.`
+        : "작품 DB의 핵심 소재·시어를 상징으로 읽는 연습을 한다."),
     keyVocabulary:
       base.keyVocabulary ??
       (keywords.length > 0
-        ? keywords.map((k) => `「${k}」: 지문 맥락에서의 의미와 작품 전체에서의 기능`).join("\n")
-        : "핵심 어휘를 지문 맥락에서 풀이한다."),
+        ? keywords.map((k) => `「${k}」: 작품 맥락에서의 의미와 주제·정서와의 연결`).join("\n")
+        : "핵심 어휘를 작품·교과서 해설 맥락에서 풀이한다."),
     repetitionEffect:
       base.repetitionEffect ??
       "반복되는 시어·구절·표현이 정서·주제·리듬에 미치는 효과를 분석한다.",
@@ -227,61 +211,72 @@ function buildLiteratureAnalysis(
   };
 }
 
-function buildPoetryAnalysis(
-  text: string,
-  selected: WorkSelection,
-  profile?: ReturnType<typeof findWorkProfile>
-): ModernPoetryAnalysis {
-  const lines = text.split(/\n+/).filter((l) => l.trim());
+function buildPoetryAnalysis(ctx: ReturnType<typeof buildWorkAnalysisContext>): ModernPoetryAnalysis {
+  const { selected, profile, keywords, symbols } = ctx;
   const base = profile?.poetry ?? {};
-  const theme = selected.theme ?? "주제는 화자·정서·표현을 종합하여 파악";
+  const theme = buildTeacherTheme(ctx);
 
   return {
     speakerSituation:
       base.speakerSituation ??
-      `「${selected.title}」 화자의 처지: ${selected.textbookGuide?.slice(0, 100) ?? "시적 상황을 교과서 해설과 대조"}`,
+      joinSections([
+        buildTeacherSceneDescription(ctx),
+        `「${selected.title}」 화자의 처지를 교과서 해설과 연결한다.`,
+      ]),
     attitudeToSubject:
-      base.attitudeToSubject ?? "화자가 대상(연인·자연·사회 등)에 대해 드러내는 태도·정서를 분석",
-    poeticSituation:
-      base.poeticSituation ?? "시가 전개되는 시적 상황(시간·공간·정서)을 정리",
+      base.attitudeToSubject ??
+      joinSections([
+        ctx.emotions.length > 0
+          ? `화자는 ${ctx.emotions.slice(0, 2).join(", ")}의 정서를 드러낸다.`
+          : "화자가 대상에 대해 드러내는 태도·정서를 분석한다.",
+        ctx.guide,
+      ]),
+    poeticSituation: base.poeticSituation ?? buildTeacherSceneDescription(ctx),
     emotionalChange:
       base.emotionalChange ??
-      (lines.length >= 2
-        ? "연별로 정서 변화를 추적: 도입(정서 제시) → 전개(심화) → 절정(주제·정서 응축)"
-        : "짧은 지문이라도 정서의 방향(고조·저조·전환)을 파악"),
+      "도입(정서 제시) → 전개(심화) → 절정(주제·정서 응축) 순으로 정서 변화를 정리한다.",
     imageryDevelopment:
-      base.imageryDevelopment ?? "시상(시의 내용 전개)이 시간·공간·정서 축을 따라 어떻게 전개되는지 분석",
+      base.imageryDevelopment ??
+      (symbols.length > 0
+        ? `${symbols.join(", ")} 등의 이미지를 따라 시상이 전개된다.`
+        : "시상(시의 내용 전개)이 시간·공간·정서 축을 따라 어떻게 전개되는지 분석"),
     stanzaSummaries:
-      base.stanzaSummaries ??
-      (lines.length >= 2
-        ? lines.slice(0, 4).map((l, i) => `${i + 1}연/행: ${l.slice(0, 80)}`)
-        : ["1연: 정서·상황 제시", "2연: 정서 심화·전개", "3연: 주제·정서 절정"]),
+      base.stanzaSummaries ?? [
+        "1연: 시적 상황과 정서의 제시",
+        "2연: 정서·이미지의 심화·전개",
+        "3연: 주제·정서의 절정",
+      ],
     keyWordInterpretations:
       base.keyWordInterpretations ??
-      extractKeywordsFromText(text, 2, 8)
-        .slice(0, 5)
-        .map((k) => `「${k}」: 지문·작품 맥락에서의 함의`),
-    imagery: base.imagery ?? "지문에서 확인되는 심상(청각·시각·촉각 등)과 정서의 연결",
+      (keywords.length > 0
+        ? keywords
+            .slice(0, 5)
+            .map((k) => `「${k}」: 작품·교과서 해설 맥락에서의 함의`)
+        : symbols.slice(0, 3).map((s) => `「${s}」: 주제·정서와 연결되는 상징`)),
+    imagery:
+      base.imagery ??
+      (symbols.length > 0
+        ? `${symbols.join(", ")} — 정서·주제와 연결되는 심상`
+        : "작품 DB·교과서 해설의 핵심 심상과 정서의 연결"),
     metaphorAndSymbol:
       base.metaphorAndSymbol ??
-      `「${selected.title}」의 비유·상징: ${selected.textbookGuide?.includes("상징") ? selected.textbookGuide : "핵심 시어를 상징으로 읽기"}`,
+      joinSections([
+        `「${selected.title}」의 비유·상징을 작품 DB 해설과 연결한다.`,
+        ctx.guide,
+      ]),
     repetitionAndParallelism:
       base.repetitionAndParallelism ?? "반복·대구·대조 등의 형식적 특징과 정서·주제 강화 효과",
     rhetoricalDevices:
-      base.rhetoricalDevices ?? "설의·영탄·도치·의인법 등 사용 여부와 효과 (지문·작품 전체 기준)",
+      base.rhetoricalDevices ?? "설의·영탄·도치·의인법 등과 작품 DB 해설상의 표현 특징",
     theme: base.theme ?? theme,
-    possibleChoices:
-      base.possibleChoices ?? buildDefaultPoetryChoices(selected),
+    possibleChoices: base.possibleChoices ?? buildDefaultPoetryChoices(selected),
   };
 }
 
-function buildNovelAnalysis(
-  text: string,
-  selected: WorkSelection,
-  profile?: ReturnType<typeof findWorkProfile>
-): ModernNovelAnalysis {
-  const signals = detectTextSignals(text);
+function buildNovelAnalysis(ctx: ReturnType<typeof buildWorkAnalysisContext>): ModernNovelAnalysis {
+  const { selected, profile, guide } = ctx;
   const base = profile?.novel ?? {};
+  const theme = buildTeacherTheme(ctx);
 
   return {
     characters:
@@ -289,74 +284,64 @@ function buildNovelAnalysis(
       `「${selected.title}」의 인물: ${selected.textbookGuide?.slice(0, 120) ?? "지문에 등장하는 인물의 성격·관계 정리"}`,
     events:
       base.events ??
-      (extractSentences(text, 3).join(" ") ||
-        "지문의 사건을 시간 순서대로 정리 (발단→전개→절정→결말)"),
+      joinSections([
+        `「${selected.title}」의 핵심 사건을 발단→전개→절정→결말 순으로 정리한다.`,
+        guide,
+      ]),
     setting:
       base.setting ??
       `${selected.era ?? "시대"} 배경, ${selected.textbookGuide?.slice(0, 60) ?? "공간·시간적 배경"}`,
     conflict: base.conflict ?? "인물 간·인물 내면·인물과 환경의 갈등",
     pointOfView:
       base.pointOfView ??
-      (signals.hasFirstPerson ? "1인칭 시점 가능성 — 서술자와 인물 구분" : "3인칭 시점 — 제한/전지적 여부 확인"),
+      "서술자 시점(1인칭/3인칭)을 작품 DB·교과서 해설과 연결하여 정리",
     narrativeFeatures:
       base.narrativeFeatures ?? "서술·묘사·대화의 비율, 행동·심리 묘사, 점층적 전개",
     characterPsychology:
-      base.characterPsychology ?? "인물의 욕구·정서·태도를 대화·행동·서술에서 추론",
+      base.characterPsychology ?? "인물의 욕구·정서·태도를 작품 해설·교과서 자료와 연결",
     dialogueAndAction:
       base.dialogueAndAction ??
-      (signals.hasDialogue
-        ? "대화가 인물 성격·관계·갈등을 드러냄. 행동은 심리의 외적 표현."
-        : "행동·묘사를 통해 인물 심리와 주제를 파악"),
+      "대화·행동을 통해 드러나는 인물 성격·관계·갈등을 작품 DB 해설과 연결",
     foreshadowing: base.foreshadowing ?? "앞 장면의 복선·떡밥이 이 지문/결말과 연결되는지 확인",
     sceneFunction:
       base.sceneFunction ?? "이 장면이 주제·인물·갈등 중 무엇을 강조하는지 기능 분석",
     endingAndTheme:
-      base.endingAndTheme ?? selected.theme ?? "결말과 주제의 관계 (지문이 결말부라면 주제 압축)",
+      base.endingAndTheme ?? theme,
     possibleChoices:
       base.possibleChoices ?? buildDefaultNovelChoices(selected),
   };
 }
 
 function buildNonLiteratureAnalysis(
-  text: string,
   selected: WorkSelection,
-  classification: TextClassification
+  classification: TextClassification,
+  ctx: ReturnType<typeof buildWorkAnalysisContext>
 ): NonLiteratureDetailedAnalysis {
-  const signals = detectTextSignals(text);
-  const paragraphs = inferParagraphSummaries(text, 6);
-  const concepts = extractKeywordsFromText(text, 3, 10).slice(0, 6);
+  const theme = selected.theme ?? ctx.themes[0] ?? `${classification.subCategory} 분야의 중심 화제`;
 
   return {
-    centralTopic:
-      selected.theme ??
-      `${classification.subCategory} 분야의 중심 화제: ${text.slice(0, 100).replace(/\n/g, " ")}…`,
-    purpose: signals.hasClaim
-      ? "주장·설득·정보 전달 목적. 필자의 의도(설명·주장·비판)를 파악한다."
-      : "설명·정보 제공·개념 정의가 주된 목적일 가능성",
-    paragraphSummaries: paragraphs,
-    structure:
-      signals.hasCompare && signals.hasCauseEffect
-        ? "개념 제시 → 비교·대조 → 원인·결과 → 정리 구조 (초안)"
-        : signals.hasClaim
-          ? "도입(문제 제기) → 본론(주장·근거) → 결론(정리) 구조"
-          : "설명문: 정의 → 예시 → 적용 → 정리",
-    keyConcepts: concepts.length > 0 ? concepts : ["핵심 개념 1", "핵심 개념 2", "핵심 개념 3"],
+    centralTopic: theme,
+    purpose: "정보 전달·설명·주장·설득 등 글의 목적을 논리 구조와 함께 정리한다.",
+    paragraphSummaries: [
+      { paragraph: 1, summary: "도입: 문제 제기·화제 제시" },
+      { paragraph: 2, summary: "전개: 개념·근거·사례 설명" },
+      { paragraph: 3, summary: "결말: 요지 정리·시사점" },
+    ],
+    structure: "도입(문제 제기) → 본론(주장·근거) → 결론(정리) 구조",
+    keyConcepts:
+      ctx.keywords.length > 0 ? ctx.keywords.slice(0, 6) : ["핵심 개념 1", "핵심 개념 2", "핵심 개념 3"],
     claimsAndEvidence: [
       {
-        claim: "글의 중심 주장 (지문·선택 출처 종합)",
-        evidence: extractSentences(text, 2)[0] ?? "근거 문장을 지문에서 직접 표시",
+        claim: "글의 중심 주장 (선택 출처·교과서 자료 종합)",
+        evidence: "근거는 교사가 지문에서 직접 확인·표시",
       },
       {
         claim: "부차적 주장 또는 보조 논점",
-        evidence: "지문 내 연결어(따라서·그러나·예를 들어)를 따라 근거 추적",
+        evidence: "연결어(따라서·그러나·예를 들어)를 따라 논리 구조화",
       },
     ],
-    comparisonContrast: signals.hasCompare
-      ? "비교·대조 관계: 공통점·차이점·대조를 통한 강조"
-      : "비교·대조 표현을 지문에서 찾아 표로 정리",
-    causeEffect: signals.hasCauseEffect
-      ? "원인→결과, 조건→결과 관계를 화살표로 정리"
-      : "인과 관계를 지문에서 추출하여 논리 구조화",
+    comparisonContrast: "비교·대조 관계를 표·도식으로 정리",
+    causeEffect: "원인→결과, 조건→결과 관계를 구조화",
     problemSolution: "문제 제기 → 원인 분석 → 해결 방안(또는 제안) 구조 여부 확인",
     difficultConcepts: [
       "추상적 개념어의 정의와 예시 연결",
@@ -368,7 +353,7 @@ function buildNonLiteratureAnalysis(
       "문단별 요지·글의 구조",
       "주장과 근거의 연결",
       "개념의 의미와 맥락",
-      selected.title !== "미상" ? `선택 출처(${selected.title})와 지문의 연관` : "출처·맥락",
+      selected.title !== "미상" ? `선택 출처(${selected.title})와 글의 연관` : "출처·맥락",
     ],
   };
 }
@@ -754,16 +739,15 @@ function buildTeacherComments(
   };
 }
 
-function buildCopyrightNotice(text: string, selected: WorkSelection): CopyrightNotice {
-  const quotes = extractShortQuotes(text, 2, 35);
+function buildCopyrightNotice(selected: WorkSelection): CopyrightNotice {
   return {
     noFullText:
-      "본 분석 자료는 작품 원문 전체를 제공하지 않습니다. 저작권 보호를 위해 OCR 추출 지문 일부와 분석 중심으로 구성됩니다.",
+      "본 분석 자료는 작품 원문 전체를 제공하지 않습니다. 저작권 보호를 위해 작품 DB 해설·교사용 분석 중심으로 구성됩니다.",
     partialOcrOnly:
-      "제공되는 지문은 사용자가 촬영·입력한 OCR 결과의 일부이며, 교사가 확인·수정한 범위 내에서만 활용하세요.",
+      "OCR 추출 지문은 분석의 직접 인용에 사용하지 않으며, 교사가 확인·수정한 작품 정보와 DB 해설을 바탕으로 합니다.",
     minimalQuotation:
       "인용은 수업·시험 준비에 필요한 최소 범위로 제한합니다. 원문 전체 복제·배포는 금지됩니다.",
-    shortQuotes: quotes.length > 0 ? quotes : [`「${selected.title}」 관련 핵심 구절 (최소 인용)`],
+    shortQuotes: [`「${selected.title}」 관련 핵심 개념·주제 (최소 인용)`],
   };
 }
 
@@ -805,16 +789,22 @@ function padReportIfNeeded(report: TeacherAnalysisReport): TeacherAnalysisReport
 export function generateDeepAnalysis(
   text: string,
   classification: TextClassification,
-  selectedWork: WorkSelection
+  selectedWork: WorkSelection,
+  options?: GenerateDeepAnalysisOptions
 ): TeacherAnalysisReport {
   const profile = findWorkProfile(selectedWork.workId, selectedWork.title);
+  const lowOcrQuality = assessOcrQuality(text, options) === "low";
+  const ctx = buildWorkAnalysisContext(selectedWork, lowOcrQuality);
   const isLiterature = resolveAnalysisType(selectedWork, classification) === "literature";
-  const genre = selectedWork.genre ?? classification.subCategory;
+  const genre = ctx.genre;
   const poetry = isLiterature && isPoetryGenre(genre, classification.subCategory);
   const novel = isLiterature && isNovelGenre(genre, classification.subCategory);
+  const theme = buildTeacherTheme(ctx);
 
   const basicInfo = buildBasicInfo(selectedWork, classification, profile);
-  const passageSummary = buildPassageSummary(text, selectedWork, profile);
+  basicInfo.themeSummary = theme;
+
+  const passageSummary = buildPassageSummary(ctx);
 
   let report: TeacherAnalysisReport = {
     type: isLiterature ? "literature" : "non_literature",
@@ -824,17 +814,19 @@ export function generateDeepAnalysis(
     lessonMaterials: buildLessonMaterials(selectedWork, classification, profile),
     examMaterials: buildExamMaterials(selectedWork, classification, isLiterature, profile),
     teacherComments: buildTeacherComments(selectedWork, classification, profile),
-    copyrightNotice: buildCopyrightNotice(text, selectedWork),
+    copyrightNotice: buildCopyrightNotice(selectedWork),
     sourceCandidates: buildSourceCandidates(selectedWork),
+    ocrQualityNotice: lowOcrQuality ? OCR_LOW_QUALITY_NOTICE : undefined,
+    analysisMode: "work_db_commentary",
     totalCharCount: 0,
   };
 
   if (isLiterature) {
-    report.literatureAnalysis = buildLiteratureAnalysis(text, selectedWork, classification, profile);
-    if (poetry) report.modernPoetryAnalysis = buildPoetryAnalysis(text, selectedWork, profile);
-    if (novel) report.modernNovelAnalysis = buildNovelAnalysis(text, selectedWork, profile);
+    report.literatureAnalysis = buildLiteratureAnalysis(ctx, classification);
+    if (poetry) report.modernPoetryAnalysis = buildPoetryAnalysis(ctx);
+    if (novel) report.modernNovelAnalysis = buildNovelAnalysis(ctx);
   } else {
-    report.nonLiteratureAnalysis = buildNonLiteratureAnalysis(text, selectedWork, classification);
+    report.nonLiteratureAnalysis = buildNonLiteratureAnalysis(selectedWork, classification, ctx);
   }
 
   report = padReportIfNeeded(report);
@@ -875,5 +867,5 @@ export function generateDeepAnalysis(
   }
 
   report.totalCharCount = countReportChars(report);
-  return report;
+  return sanitizeReportValue(report, text) as TeacherAnalysisReport;
 }

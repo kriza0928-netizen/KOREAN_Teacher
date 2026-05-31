@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { AnalysisResponse, TextClassification } from "@/types";
 import type { WorkSearchMatch, WorkSearchResult, WorkSelection } from "@/lib/literature/types";
-import { enrichWorkSelection } from "@/lib/literature/search";
+import { enrichWorkSelection } from "@/lib/literature/enrich-work-selection";
 import { Header } from "@/components/Header";
 import { ImageCapture } from "@/components/ImageCapture";
 import { TextEditor } from "@/components/TextEditor";
