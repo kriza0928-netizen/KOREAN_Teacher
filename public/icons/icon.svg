@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="108" fill="#1e3a5f"/>
+  <rect x="136" y="120" width="240" height="272" rx="20" fill="#ffffff" opacity="0.95"/>
+  <rect x="168" y="168" width="176" height="12" rx="6" fill="#c45c26"/>
+  <rect x="168" y="200" width="140" height="10" rx="5" fill="#1e3a5f" opacity="0.35"/>
+  <rect x="168" y="228" width="160" height="10" rx="5" fill="#1e3a5f" opacity="0.35"/>
+  <rect x="168" y="256" width="120" height="10" rx="5" fill="#1e3a5f" opacity="0.35"/>
+  <text x="256" y="360" text-anchor="middle" font-family="Arial, sans-serif" font-size="72" font-weight="700" fill="#1e3a5f">국</text>
+</svg>
