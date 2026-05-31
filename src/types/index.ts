@@ -58,6 +58,23 @@ export interface SampleQuestion {
   hint?: string;
 }
 
+export type {
+  TeacherAnalysisReport,
+  WorkBasicInfo,
+  PassageSummary,
+  LiteratureDetailedAnalysis,
+  ModernPoetryAnalysis,
+  ModernNovelAnalysis,
+  NonLiteratureDetailedAnalysis,
+  LessonMaterials,
+  ExamMaterials,
+  ExamQuestionMultipleChoice,
+  ExamQuestionShortAnswer,
+  TeacherComments,
+  CopyrightNotice,
+} from "./analysis-report";
+
+/** @deprecated v2.0 TeacherAnalysisReport 사용 */
 export interface LiteratureAnalysis {
   type: "literature";
   sourceCandidates: SourceCandidate[];
@@ -73,6 +90,7 @@ export interface LiteratureAnalysis {
   summary: string;
 }
 
+/** @deprecated v2.0 TeacherAnalysisReport 사용 */
 export interface NonLiteratureAnalysis {
   type: "non_literature";
   sourceCandidates: SourceCandidate[];
@@ -88,7 +106,7 @@ export interface NonLiteratureAnalysis {
   summary: string;
 }
 
-export type AnalysisResult = LiteratureAnalysis | NonLiteratureAnalysis;
+export type AnalysisResult = import("./analysis-report").TeacherAnalysisReport;
 
 export interface ManualSourceInput {
   title?: string;
@@ -104,6 +122,10 @@ export interface AnalysisResponse {
   message?: string;
   ocr: OcrMeta;
   extractedText?: string;
+  /** OCR 원문 (교정 전) */
+  originalOcrText?: string;
+  /** 작품 기반 교정 OCR */
+  correctedOcrText?: string;
   classification?: TextClassification;
   textType?: TextType;
   confidence?: number;
@@ -125,6 +147,10 @@ export interface OcrResult {
 
 export interface AnalyzeRequest {
   text: string;
+  /** OCR 원문 (교정 전) */
+  originalOcrText?: string;
+  /** 작품 기반 교정 OCR (사용자 적용 후) */
+  correctedOcrText?: string;
   ocr: {
     success: boolean;
     confidence: number;

@@ -1,4 +1,5 @@
 import type { AnalysisResponse } from "@/types";
+import type { TeacherAnalysisReport } from "@/types/analysis-report";
 
 export interface ExportDocument {
   title: string;
@@ -17,6 +18,163 @@ export interface ExportSection {
   items: { label: string; value: string }[];
 }
 
+function pushSection(sections: ExportSection[], heading: string, items: { label: string; value: string }[]) {
+  if (items.length > 0) sections.push({ heading, items });
+}
+
+function reportToSections(report: TeacherAnalysisReport): ExportSection[] {
+  const sections: ExportSection[] = [];
+
+  pushSection(sections, "1. 작품 기본 정보", [
+    { label: "작품명", value: report.basicInfo.title },
+    { label: "작가", value: report.basicInfo.author },
+    { label: "갈래", value: report.basicInfo.genre },
+    { label: "시대", value: report.basicInfo.era },
+    { label: "수록 가능 영역", value: report.basicInfo.curriculumArea },
+    { label: "핵심 주제", value: report.basicInfo.themeSummary },
+    { label: "수업 난이도", value: report.basicInfo.difficulty },
+  ]);
+
+  pushSection(sections, "2. 지문 요약", [
+    { label: "전체 요약", value: report.passageSummary.overallSummary },
+    { label: "장면/상황", value: report.passageSummary.sceneDescription },
+    { label: "앞뒤 맥락", value: report.passageSummary.contextBeforeAfter },
+    ...report.passageSummary.importantParts.map((p, i) => ({
+      label: `중요 부분 ${i + 1}`,
+      value: p,
+    })),
+  ]);
+
+  if (report.literatureAnalysis) {
+    const l = report.literatureAnalysis;
+    pushSection(sections, "3. 문학 작품 분석", [
+      { label: "화자/서술자", value: l.speaker },
+      { label: "중심 대상", value: l.centralSubject },
+      { label: "상황", value: l.situation },
+      { label: "정서와 태도", value: l.emotionAndAttitude },
+      { label: "주제 의식", value: l.themeConsciousness },
+      { label: "갈등 구조", value: l.conflictStructure },
+      { label: "인물 관계", value: l.characterRelations },
+      { label: "표현상 특징", value: l.expressionFeatures },
+      { label: "상징적 소재", value: l.symbolicMaterials },
+      { label: "핵심 어휘", value: l.keyVocabulary },
+      { label: "반복 표현", value: l.repetitionEffect },
+      { label: "분위기·어조", value: l.moodAndTone },
+      { label: "지문 위치", value: l.positionInWork },
+      ...l.studentConfusionPoints.map((p, i) => ({ label: `헷갈림 ${i + 1}`, value: p })),
+      ...l.examFocusPoints.map((p, i) => ({ label: `시험 포인트 ${i + 1}`, value: p })),
+    ]);
+  }
+
+  if (report.modernPoetryAnalysis) {
+    const p = report.modernPoetryAnalysis;
+    pushSection(sections, "4. 현대시 분석", [
+      { label: "화자의 처지", value: p.speakerSituation },
+      { label: "대상에 대한 태도", value: p.attitudeToSubject },
+      { label: "시적 상황", value: p.poeticSituation },
+      { label: "정서 변화", value: p.emotionalChange },
+      { label: "시상 전개", value: p.imageryDevelopment },
+      { label: "심상", value: p.imagery },
+      { label: "비유·상징", value: p.metaphorAndSymbol },
+      { label: "반복·대구", value: p.repetitionAndParallelism },
+      { label: "표현법", value: p.rhetoricalDevices },
+      { label: "주제", value: p.theme },
+      ...p.stanzaSummaries.map((s, i) => ({ label: `${i + 1}연`, value: s })),
+    ]);
+  }
+
+  if (report.modernNovelAnalysis) {
+    const n = report.modernNovelAnalysis;
+    pushSection(sections, "5. 현대소설 분석", [
+      { label: "인물", value: n.characters },
+      { label: "사건", value: n.events },
+      { label: "배경", value: n.setting },
+      { label: "갈등", value: n.conflict },
+      { label: "시점", value: n.pointOfView },
+      { label: "서술상 특징", value: n.narrativeFeatures },
+      { label: "인물 심리", value: n.characterPsychology },
+      { label: "대화·행동", value: n.dialogueAndAction },
+      { label: "복선", value: n.foreshadowing },
+      { label: "장면 기능", value: n.sceneFunction },
+      { label: "결말·주제", value: n.endingAndTheme },
+    ]);
+  }
+
+  if (report.nonLiteratureAnalysis) {
+    const n = report.nonLiteratureAnalysis;
+    pushSection(sections, "6. 비문학 분석", [
+      { label: "중심 화제", value: n.centralTopic },
+      { label: "글의 목적", value: n.purpose },
+      { label: "글의 구조", value: n.structure },
+      { label: "비교·대조", value: n.comparisonContrast },
+      { label: "원인·결과", value: n.causeEffect },
+      { label: "문제·해결", value: n.problemSolution },
+      ...n.paragraphSummaries.map((p) => ({
+        label: `${p.paragraph}문단`,
+        value: p.summary,
+      })),
+      ...n.keyConcepts.map((c, i) => ({ label: `개념 ${i + 1}`, value: c })),
+      ...n.claimsAndEvidence.map((ce, i) => ({
+        label: `주장·근거 ${i + 1}`,
+        value: `${ce.claim} / ${ce.evidence}`,
+      })),
+    ]);
+  }
+
+  const lm = report.lessonMaterials;
+  pushSection(sections, "7. 수업 활용 자료", [
+    ...lm.introQuestions.map((q, i) => ({ label: `도입 ${i + 1}`, value: q })),
+    { label: "배경지식", value: lm.backgroundKnowledge },
+    ...lm.studentGuidingQuestions.map((q, i) => ({ label: `유도 질문 ${i + 1}`, value: q })),
+    ...lm.discussionQuestions.map((q, i) => ({ label: `토론 ${i + 1}`, value: q })),
+    ...lm.boardSummary.map((b, i) => ({ label: `판서 ${i + 1}`, value: b })),
+    ...lm.performanceAssessmentIdeas.map((p, i) => ({ label: `수행평가 ${i + 1}`, value: p })),
+  ]);
+
+  pushSection(
+    sections,
+    "8. 시험 대비 — 객관식",
+    report.examMaterials.multipleChoice.flatMap((q) => [
+      { label: `문제 ${q.number}`, value: q.question },
+      ...q.choices.map((c, i) => ({ label: `선지 ${i + 1}`, value: c })),
+      { label: "정답", value: `${q.answer}번` },
+      { label: "해설", value: q.explanation },
+      { label: "출제 의도", value: q.intent },
+    ])
+  );
+
+  pushSection(
+    sections,
+    "8. 시험 대비 — 서술형",
+    report.examMaterials.shortAnswer.flatMap((q) => [
+      { label: `문제 ${q.number}`, value: q.question },
+      { label: "모범 답안", value: q.modelAnswer },
+      { label: "채점 기준", value: q.gradingCriteria },
+      { label: "출제 의도", value: q.intent },
+    ])
+  );
+
+  const tc = report.teacherComments;
+  pushSection(sections, "9. 교사용 코멘트", [
+    ...tc.emphasisPoints.map((p, i) => ({ label: `강조 ${i + 1}`, value: p })),
+    ...tc.commonMisunderstandings.map((p, i) => ({ label: `오해 ${i + 1}`, value: p })),
+    ...tc.internalExamTips.map((p, i) => ({ label: `내신 ${i + 1}`, value: p })),
+    ...tc.csatExtensionPoints.map((p, i) => ({ label: `수능 ${i + 1}`, value: p })),
+  ]);
+
+  pushSection(sections, "10. 저작권 주의", [
+    { label: "원문 미제공", value: report.copyrightNotice.noFullText },
+    { label: "OCR 일부", value: report.copyrightNotice.partialOcrOnly },
+    { label: "최소 인용", value: report.copyrightNotice.minimalQuotation },
+    ...report.copyrightNotice.shortQuotes.map((q, i) => ({
+      label: `인용 ${i + 1}`,
+      value: `"${q}"`,
+    })),
+  ]);
+
+  return sections;
+}
+
 export function buildExportDocument(
   response: AnalysisResponse,
   format: "pdf" | "hwp"
@@ -25,7 +183,7 @@ export function buildExportDocument(
     throw new Error("완료된 분석 결과만 내보낼 수 있습니다.");
   }
 
-  const { analysis: data, classification, disclaimer, ocr } = response;
+  const { analysis: data, classification, disclaimer, ocr, selectedWork } = response;
   const sections: ExportSection[] = [];
 
   sections.push({
@@ -34,8 +192,20 @@ export function buildExportDocument(
       { label: "추출 성공", value: ocr.success ? "성공" : "실패" },
       { label: "추출 신뢰도", value: `${ocr.confidence}%` },
       { label: "Provider", value: ocr.provider },
+      ...(selectedWork
+        ? [
+            { label: "선택 작품", value: `${selectedWork.title} / ${selectedWork.author}` },
+          ]
+        : []),
       ...(response.extractedText
-        ? [{ label: "추출 텍스트", value: response.extractedText.slice(0, 500) + (response.extractedText.length > 500 ? "…" : "") }]
+        ? [
+            {
+              label: "추출 텍스트 (일부)",
+              value:
+                response.extractedText.slice(0, 400) +
+                (response.extractedText.length > 400 ? "…" : ""),
+            },
+          ]
         : []),
     ],
   });
@@ -47,108 +217,13 @@ export function buildExportDocument(
       { label: "세부 분류", value: classification.subCategory },
       { label: "분류 신뢰도", value: `${classification.confidence}%` },
       { label: "분류 근거", value: classification.reason },
-      ...classification.warnings.map((w, i) => ({
-        label: `주의 ${i + 1}`,
-        value: w,
-      })),
     ],
   });
 
-  sections.push({
-    heading: "출처 후보",
-    items: data.sourceCandidates.map((s, i) => ({
-      label: `후보 ${i + 1}`,
-      value: `${s.title} / ${s.author} (${s.source}) — 신뢰도 ${Math.round(s.confidence * 100)}%`,
-    })),
-  });
-
-  if (data.type === "literature") {
-    sections.push(
-      {
-        heading: "작품 정보",
-        items: [
-          { label: "갈래", value: data.genre },
-          { label: "시대/배경", value: data.era },
-          { label: "주제", value: data.theme },
-        ],
-      },
-      {
-        heading: "화자·정서",
-        items: [
-          { label: "화자/서술자", value: data.narrator },
-          { label: "정서와 태도", value: data.emotionAndAttitude },
-        ],
-      },
-      {
-        heading: "표현법",
-        items: data.expressions.map((e, i) => ({
-          label: `${i + 1}`,
-          value: e,
-        })),
-      }
-    );
-  } else {
-    sections.push(
-      {
-        heading: "글의 개요",
-        items: [
-          { label: "분야", value: data.field },
-          { label: "중심 화제", value: data.centralTopic },
-          { label: "글의 구조", value: data.structure },
-        ],
-      },
-      {
-        heading: "문단별 요지",
-        items: data.paragraphSummaries.map((p) => ({
-          label: `${p.paragraph}문단`,
-          value: p.summary,
-        })),
-      },
-      {
-        heading: "핵심 개념",
-        items: data.keyConcepts.map((c, i) => ({
-          label: `${i + 1}`,
-          value: c,
-        })),
-      },
-      {
-        heading: "주장·근거",
-        items: data.claimEvidence.map((ce, i) => ({
-          label: `관계 ${i + 1}`,
-          value: `주장: ${ce.claim} / 근거: ${ce.evidence}`,
-        })),
-      }
-    );
-  }
-
-  sections.push({
-    heading: "출제 포인트",
-    items: data.examPoints.map((p, i) => ({
-      label: `${i + 1}`,
-      value: p,
-    })),
-  });
-
-  sections.push({
-    heading: "예상 문제",
-    items: data.sampleQuestions.map((q, i) => ({
-      label: `문제 ${i + 1} (${q.type})`,
-      value: q.hint ? `${q.question}\n[힌트] ${q.hint}` : q.question,
-    })),
-  });
-
-  if (data.shortQuotes.length > 0) {
-    sections.push({
-      heading: "짧은 인용 (저작권 보호)",
-      items: data.shortQuotes.map((q, i) => ({
-        label: `인용 ${i + 1}`,
-        value: `"${q}"`,
-      })),
-    });
-  }
+  sections.push(...reportToSections(data));
 
   return {
-    title: "국어 수업 분석 자료",
+    title: `국어 수업 분석 자료 — ${data.basicInfo.title}`,
     generatedAt: new Date().toLocaleString("ko-KR"),
     textType: `${classification.category} (${classification.subCategory})`,
     sections,
@@ -159,7 +234,7 @@ export function buildExportDocument(
     ],
     metadata: {
       format,
-      version: "1.0-mvp",
+      version: "2.0-deep",
     },
   };
 }

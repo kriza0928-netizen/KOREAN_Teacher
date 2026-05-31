@@ -1,23 +1,21 @@
-import worksDatabase from "@/data/literature-works.json";
+import { loadLiteratureDatabase } from "@/lib/literature/load-database";
+import { extractOcrSearchFeatures } from "@/lib/literature/extract-features";
 import { extractSearchPhrases } from "@/lib/literature/extract-phrases";
-import {
-  fuzzyMatchInOcr,
-  normalizeOcrText,
-  partialPoints,
-} from "@/lib/literature/normalize";
+import { normalizeOcrText } from "@/lib/literature/normalize";
+import { compareScoredWorks, scoreWorkMatch } from "@/lib/literature/scoring";
+import { buildWorkSearchProfile } from "@/lib/literature/work-profile";
+import { postProcessOcrText, preserveRawOcrText } from "@/lib/ocr/post-process";
 import {
   AUTO_MATCH_THRESHOLD,
-  SCORE,
   TOP_MATCH_COUNT,
-  type LiteratureWork,
-  type LiteratureWorksDatabase,
-  type MatchReason,
   type WorkSearchMatch,
   type WorkSearchResult,
   type WorkSelection,
+  type LiteratureWork,
 } from "@/lib/literature/types";
 
-const db = worksDatabase as LiteratureWorksDatabase;
+const db = loadLiteratureDatabase();
+const profiles = db.works.map(buildWorkSearchProfile);
 
 export function getLiteratureWorks(): LiteratureWork[] {
   return db.works;
@@ -30,153 +28,23 @@ export function getDatabaseMeta() {
   };
 }
 
-interface ScoredWork {
-  work: LiteratureWork;
-  score: number;
-  reasons: MatchReason[];
-}
+function toWorkSearchMatch(item: ReturnType<typeof scoreWorkMatch>): WorkSearchMatch {
+  const work = item.profile.work;
+  const topReasons = [...item.reasons]
+    .filter((r) => r.label !== "일반어")
+    .sort((a, b) => b.points - a.points);
+  const topReason = topReasons[0] ?? item.reasons[0];
 
-function reasonKey(reason: MatchReason): string {
-  return `${reason.label}:${reason.matchedTerm}`;
-}
-
-function addReason(
-  reasons: MatchReason[],
-  seen: Set<string>,
-  label: string,
-  basePoints: number,
-  term: string,
-  similarity: number
-): number {
-  const points = partialPoints(basePoints, similarity);
-  if (points <= 0) return 0;
-
-  const reason: MatchReason = { label, points, matchedTerm: term, similarity };
-  const key = reasonKey(reason);
-  if (seen.has(key)) return 0;
-
-  seen.add(key);
-  reasons.push(reason);
-  return points;
-}
-
-function tryMatchTerms(
-  ocrNorm: string,
-  terms: string[],
-  basePoints: number,
-  labelFn: (term: string) => string,
-  reasons: MatchReason[],
-  seen: Set<string>
-): number {
-  let total = 0;
-  for (const term of terms) {
-    const match = fuzzyMatchInOcr(ocrNorm, term);
-    if (match.matched) {
-      total += addReason(
-        reasons,
-        seen,
-        labelFn(term),
-        basePoints,
-        term,
-        match.similarity
-      );
-    }
-  }
-  return total;
-}
-
-function scoreWork(work: LiteratureWork, ocrNorm: string): ScoredWork {
-  const reasons: MatchReason[] = [];
-  const seen = new Set<string>();
-  let score = 0;
-
-  score += tryMatchTerms(
-    ocrNorm,
-    [work.title, ...(work.aliases ?? [])],
-    SCORE.TITLE_AUTHOR,
-    () => "작품명 일치",
-    reasons,
-    seen
-  );
-
-  score += tryMatchTerms(
-    ocrNorm,
-    [work.author],
-    SCORE.TITLE_AUTHOR,
-    () => "작가명 일치",
-    reasons,
-    seen
-  );
-
-  score += tryMatchTerms(
-    ocrNorm,
-    work.properNouns ?? [],
-    SCORE.PROPER_NOUN,
-    (term) => `${term} 일치`,
-    reasons,
-    seen
-  );
-
-  score += tryMatchTerms(
-    ocrNorm,
-    work.materials ?? [],
-    SCORE.MATERIAL,
-    (term) => `${term} 일치`,
-    reasons,
-    seen
-  );
-
-  score += tryMatchTerms(
-    ocrNorm,
-    work.famousPhrases ?? [],
-    SCORE.FAMOUS_PHRASE,
-    (term) => `${term} 구절 일치`,
-    reasons,
-    seen
-  );
-
-  score += tryMatchTerms(
-    ocrNorm,
-    work.keywordAliases ?? [],
-    SCORE.FAMOUS_PHRASE,
-    (term) => `${term} 구절 일치`,
-    reasons,
-    seen
-  );
-
-  const genericKeywords = work.keywords.filter(
-    (kw) =>
-      !(work.properNouns ?? []).includes(kw) &&
-      !(work.materials ?? []).includes(kw) &&
-      !(work.famousPhrases ?? []).includes(kw)
-  );
-
-  score += tryMatchTerms(
-    ocrNorm,
-    genericKeywords,
-    SCORE.GENERIC_KEYWORD,
-    (term) => `${term} 키워드 일치`,
-    reasons,
-    seen
-  );
-
-  const cappedScore = Math.min(100, score);
-
-  return { work, score: cappedScore, reasons };
-}
-
-function toWorkSearchMatch(item: ScoredWork): WorkSearchMatch {
-  const topReason = [...item.reasons].sort((a, b) => b.points - a.points)[0];
   return {
-    workId: item.work.id,
-    title: item.work.title,
-    author: item.work.author,
-    genre: item.work.genre,
-    source: item.work.source,
-    confidence: item.score,
-    score: item.score,
+    workId: work.id,
+    title: work.title,
+    author: work.author,
+    genre: work.genre,
+    source: work.source,
+    confidence: item.confidence,
+    score: item.confidence,
     matchReasons: item.reasons,
-    matchedKeyword: topReason?.matchedTerm ?? item.work.title,
+    matchedKeyword: topReason?.matchedTerm ?? work.title,
     matchedPhrase: topReason?.label ?? "",
   };
 }
@@ -187,6 +55,11 @@ export function getWorkById(workId: string): LiteratureWork | undefined {
 
 export function enrichWorkSelection(match: WorkSearchMatch): WorkSelection {
   const work = getWorkById(match.workId);
+  const theme =
+    work?.themes?.join(", ") ??
+    work?.theme ??
+    match.matchReasons.find((r) => r.label === "핵심어")?.matchedTerm;
+
   return {
     mode: "db",
     workId: match.workId,
@@ -195,25 +68,49 @@ export function enrichWorkSelection(match: WorkSearchMatch): WorkSelection {
     source: match.source ?? work?.source,
     genre: work?.genre ?? match.genre,
     era: work?.era,
-    theme: work?.theme,
+    theme,
     textbookGuide: work?.textbookGuide,
     matchScore: match.score,
     matchReasons: match.matchReasons,
   };
 }
 
-export function searchLiteratureWorks(text: string): WorkSearchResult {
-  const normalizedText = normalizeOcrText(text);
-  const phrases = extractSearchPhrases(text);
+export function searchLiteratureWorks(
+  text: string,
+  options?: { rawText?: string; cleanedText?: string }
+): WorkSearchResult {
+  const rawText = preserveRawOcrText(options?.rawText ?? text);
+  const cleanedText = options?.cleanedText ?? postProcessOcrText(rawText);
+  const normalizedText = normalizeOcrText(rawText);
+  const cleanedNormalizedText = normalizeOcrText(cleanedText);
+  const phrases = extractSearchPhrases(rawText);
+  const cleanedPhrases = extractSearchPhrases(cleanedText);
+  const features = extractOcrSearchFeatures(rawText);
 
-  if (!normalizedText || normalizedText.length < 8) {
-    return { phrases, normalizedText, matches: [], notFound: true };
+  if (
+    (!normalizedText || normalizedText.length < 6) &&
+    (!cleanedNormalizedText || cleanedNormalizedText.length < 6)
+  ) {
+    return {
+      phrases,
+      normalizedText,
+      cleanedText,
+      cleanedNormalizedText,
+      matches: [],
+      notFound: true,
+      extractedFeatures: features,
+    };
   }
 
-  const scored = db.works
-    .map((work) => scoreWork(work, normalizedText))
-    .filter((item) => item.score > 0)
-    .sort((a, b) => b.score - a.score || b.reasons.length - a.reasons.length);
+  const scored = profiles
+    .map((profile) =>
+      scoreWorkMatch(profile, rawText, phrases, {
+        cleanedText,
+        cleanedPhrases,
+      })
+    )
+    .filter((item) => item.confidence > 0)
+    .sort(compareScoredWorks);
 
   const matches = scored.slice(0, TOP_MATCH_COUNT).map(toWorkSearchMatch);
   const autoMatch = matches.find((m) => m.score >= AUTO_MATCH_THRESHOLD);
@@ -221,8 +118,14 @@ export function searchLiteratureWorks(text: string): WorkSearchResult {
   return {
     phrases,
     normalizedText,
+    cleanedText,
+    cleanedNormalizedText,
     matches,
     autoMatch,
     notFound: matches.length === 0,
+    extractedFeatures: features,
   };
 }
+
+export { extractOcrSearchFeatures, summarizeFeatures } from "@/lib/literature/extract-features";
+export { scoreWorkMatch, compareScoredWorks } from "@/lib/literature/scoring";

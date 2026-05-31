@@ -5,7 +5,7 @@ export interface PreprocessProgress {
   progress: number;
 }
 
-/** OCR 후보 이미지 — 원본 필수, 나머지는 보조 */
+/** OCR 후보 이미지 — 필요 시에만 생성 */
 export interface OcrImageVariants {
   original: HTMLCanvasElement;
   grayscale: HTMLCanvasElement;
@@ -22,7 +22,7 @@ export const OCR_VARIANT_LABELS: Record<keyof OcrImageVariants, string> = {
   denoised: "노이즈 제거",
 };
 
-const SCALE_FACTOR = 2.5;
+export const MAX_OCR_LONG_EDGE = 1500;
 
 function loadImageFromFile(file: File): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -117,48 +117,6 @@ function applyThreshold(data: ImageData, threshold: number): ImageData {
   return out;
 }
 
-function scaleCanvas(source: HTMLCanvasElement, factor: number): HTMLCanvasElement {
-  const scaled = createCanvas(
-    Math.round(source.width * factor),
-    Math.round(source.height * factor)
-  );
-  const ctx = getContext(scaled);
-  ctx.imageSmoothingEnabled = true;
-  ctx.drawImage(source, 0, 0, scaled.width, scaled.height);
-  return scaled;
-}
-
-function median(values: number[]): number {
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 0
-    ? Math.round((sorted[mid - 1] + sorted[mid]) / 2)
-    : sorted[mid];
-}
-
-function removeNoise(data: ImageData): ImageData {
-  const { width, height, data: src } = data;
-  const out = cloneImageData(data);
-
-  for (let y = 1; y < height - 1; y++) {
-    for (let x = 1; x < width - 1; x++) {
-      const neighbors: number[] = [];
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          neighbors.push(src[((y + dy) * width + (x + dx)) * 4]);
-        }
-      }
-      const value = median(neighbors);
-      const i = (y * width + x) * 4;
-      out.data[i] = value;
-      out.data[i + 1] = value;
-      out.data[i + 2] = value;
-    }
-  }
-
-  return out;
-}
-
 function putImageDataOnCanvas(data: ImageData): HTMLCanvasElement {
   const canvas = createCanvas(data.width, data.height);
   getContext(canvas).putImageData(data, 0, 0);
@@ -169,44 +127,58 @@ function imageDataFromCanvas(canvas: HTMLCanvasElement): ImageData {
   return getContext(canvas).getImageData(0, 0, canvas.width, canvas.height);
 }
 
-function fileToOriginalCanvas(file: File): Promise<HTMLCanvasElement> {
-  return loadImageFromFile(file).then((img) => {
-    const canvas = createCanvas(img.width, img.height);
-    getContext(canvas).drawImage(img, 0, 0);
-    return canvas;
-  });
+/** 긴 변 기준 리사이즈 후 원본 canvas 반환 */
+export async function loadResizedOcrCanvas(
+  file: File,
+  maxLongEdge = MAX_OCR_LONG_EDGE
+): Promise<HTMLCanvasElement> {
+  const img = await loadImageFromFile(file);
+  let width = img.width;
+  let height = img.height;
+  const longEdge = Math.max(width, height);
+
+  if (longEdge > maxLongEdge) {
+    const scale = maxLongEdge / longEdge;
+    width = Math.round(width * scale);
+    height = Math.round(height * scale);
+  }
+
+  const canvas = createCanvas(width, height);
+  const ctx = getContext(canvas);
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(img, 0, 0, width, height);
+  return canvas;
 }
 
-/**
- * 전처리 파이프라인 (누적):
- * 원본 → 흑백 → threshold → 확대 → 노이즈 제거
- * 각 단계별 canvas를 OCR 보조 후보로 반환. 원본은 반드시 포함.
- */
+export function toGrayscaleCanvas(original: HTMLCanvasElement): HTMLCanvasElement {
+  return putImageDataOnCanvas(toGrayscale(imageDataFromCanvas(original)));
+}
+
+export function toThresholdCanvas(original: HTMLCanvasElement): HTMLCanvasElement {
+  const grayData = toGrayscale(imageDataFromCanvas(original));
+  const threshValue = computeOtsuThreshold(grayData);
+  return putImageDataOnCanvas(applyThreshold(grayData, threshValue));
+}
+
+/** @deprecated 순차 OCR은 loadResizedOcrCanvas + lazy 변환 사용 */
 export async function buildOcrImageVariants(
   file: File,
   onProgress?: (progress: PreprocessProgress) => void
 ): Promise<OcrImageVariants> {
   onProgress?.({ step: "원본 이미지 준비", progress: 10 });
-  const original = await fileToOriginalCanvas(file);
+  const original = await loadResizedOcrCanvas(file);
+  onProgress?.({ step: "흑백 변환", progress: 40 });
+  const grayscale = toGrayscaleCanvas(original);
+  onProgress?.({ step: "threshold 처리", progress: 70 });
+  const threshold = toThresholdCanvas(original);
 
-  onProgress?.({ step: "흑백 변환", progress: 25 });
-  const grayData = toGrayscale(imageDataFromCanvas(original));
-  const grayscale = putImageDataOnCanvas(grayData);
-
-  onProgress?.({ step: "threshold 처리", progress: 40 });
-  const threshValue = computeOtsuThreshold(grayData);
-  const threshold = putImageDataOnCanvas(applyThreshold(grayData, threshValue));
-
-  onProgress?.({ step: "이미지 확대", progress: 55 });
-  const scaled = scaleCanvas(threshold, SCALE_FACTOR);
-
-  onProgress?.({ step: "노이즈 제거", progress: 65 });
-  const denoised = putImageDataOnCanvas(
-    removeNoise(imageDataFromCanvas(scaled))
-  );
-
-  onProgress?.({ step: "이미지 변형 준비 완료", progress: 70 });
-  return { original, grayscale, threshold, scaled, denoised };
+  return {
+    original,
+    grayscale,
+    threshold,
+    scaled: original,
+    denoised: original,
+  };
 }
 
 /** @deprecated buildOcrImageVariants 사용 */

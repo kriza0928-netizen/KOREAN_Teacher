@@ -52,7 +52,11 @@ export function WorkSelectStep({
         classification={classification}
         searchResult={
           workSearchResult
-            ? { matches: workSearchResult.matches, notFound: workSearchResult.notFound }
+            ? {
+                matches: workSearchResult.matches,
+                notFound: workSearchResult.notFound,
+                extractedFeatures: workSearchResult.extractedFeatures,
+              }
             : null
         }
         isSearching={isSearching}

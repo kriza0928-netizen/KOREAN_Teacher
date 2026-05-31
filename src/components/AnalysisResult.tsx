@@ -1,9 +1,9 @@
 "use client";
 
-import type { AnalysisResponse, AnalysisResult, LiteratureAnalysis, NonLiteratureAnalysis } from "@/types";
+import type { AnalysisResponse, AnalysisResult } from "@/types";
 import { DisclaimerBanner } from "./DisclaimerBanner";
-import { AnalysisCard, BulletList } from "./AnalysisCard";
 import { SelectedWorkBanner } from "./SelectedWorkBanner";
+import { DetailedAnalysisReport } from "./DetailedAnalysisReport";
 
 interface AnalysisResultProps {
   result: AnalysisResponse;
@@ -37,38 +37,6 @@ function ExtractionStatusBar({ result }: { result: AnalysisResponse }) {
   );
 }
 
-function EditableField({
-  label,
-  value,
-  onChange,
-  multiline = false,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  multiline?: boolean;
-}) {
-  return (
-    <div>
-      <label className="text-xs font-medium text-muted">{label}</label>
-      {multiline ? (
-        <textarea
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="mt-1 w-full rounded-lg border border-border bg-white p-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/30"
-          rows={3}
-        />
-      ) : (
-        <input
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="mt-1 w-full rounded-lg border border-border bg-white px-2 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/30"
-        />
-      )}
-    </div>
-  );
-}
-
 function StatusMessage({ result, onReset }: { result: AnalysisResponse; onReset: () => void }) {
   const titles: Record<string, string> = {
     ocr_invalid: "텍스트 추출 실패",
@@ -84,7 +52,11 @@ function StatusMessage({ result, onReset }: { result: AnalysisResponse; onReset:
       {result.message && (
         <p className="mt-2 whitespace-pre-line text-sm text-amber-900/90">{result.message}</p>
       )}
-      <button type="button" onClick={onReset} className="mt-4 w-full rounded-xl bg-primary py-3.5 text-sm font-semibold text-white">
+      <button
+        type="button"
+        onClick={onReset}
+        className="mt-4 w-full rounded-xl bg-primary py-3.5 text-sm font-semibold text-white"
+      >
         다시 촬영하기
       </button>
     </div>
@@ -98,7 +70,7 @@ export function AnalysisResultView({
   onExport,
   isExporting,
 }: AnalysisResultProps) {
-  const { analysis, classification, disclaimer, extractedText, status, isDraft, selectedWork } = result;
+  const { analysis, classification, disclaimer, extractedText, originalOcrText, correctedOcrText, status, isDraft, selectedWork } = result;
   const isComplete = status === "complete" && analysis && classification;
 
   const updateAnalysis = (next: AnalysisResult) => {
@@ -125,18 +97,9 @@ export function AnalysisResultView({
 
       {isDraft && (
         <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          <strong>자동 분석 초안</strong> — 규칙 기반으로 생성되었습니다. 아래 내용을 교사가 직접 수정·보완하세요.
+          <strong>교사용 심층 분석 초안</strong> — 선택 작품 DB·교과서 해설·OCR 지문을 종합하여 생성되었습니다.
+          아래 내용을 교사가 검토·수정한 뒤 수업·내신에 활용하세요.
         </div>
-      )}
-
-      {extractedText && (
-        <AnalysisCard title="추출된 텍스트" icon="📝">
-          <textarea
-            value={extractedText}
-            onChange={(e) => onResultChange({ ...result, extractedText: e.target.value })}
-            className="max-h-48 min-h-[100px] w-full resize-y rounded-lg border border-border bg-gray-50 p-3 text-sm leading-relaxed"
-          />
-        </AnalysisCard>
       )}
 
       <div
@@ -146,90 +109,47 @@ export function AnalysisResultView({
             : "bg-gradient-to-br from-non-literature to-teal-700"
         }`}
       >
-        <h2 className="text-xl font-bold">{isLiterature ? "📖 문학" : "📄 비문학"}</h2>
-        <p className="mt-1 text-sm">{classification.category} · {classification.subCategory}</p>
+        <h2 className="text-xl font-bold">{isLiterature ? "📖 문학 심층 분석" : "📄 비문학 심층 분석"}</h2>
+        <p className="mt-1 text-sm">
+          {classification.category} · {classification.subCategory}
+        </p>
         <p className="mt-2 text-sm text-white/90">{classification.reason}</p>
       </div>
 
-      <AnalysisCard title="출처 후보 (수정 가능)" icon="🔍" variant="warning">
-        {analysis.sourceCandidates.map((s, i) => (
-          <div key={i} className="space-y-2 rounded-lg bg-white/80 p-3">
-            <EditableField
-              label="작품명"
-              value={s.title}
-              onChange={(v) => {
-                const candidates = [...analysis.sourceCandidates];
-                candidates[i] = { ...candidates[i], title: v };
-                updateAnalysis({ ...analysis, sourceCandidates: candidates });
-              }}
-            />
-            <EditableField
-              label="작가"
-              value={s.author}
-              onChange={(v) => {
-                const candidates = [...analysis.sourceCandidates];
-                candidates[i] = { ...candidates[i], author: v };
-                updateAnalysis({ ...analysis, sourceCandidates: candidates });
-              }}
-            />
-            <EditableField
-              label="출처"
-              value={s.source}
-              onChange={(v) => {
-                const candidates = [...analysis.sourceCandidates];
-                candidates[i] = { ...candidates[i], source: v };
-                updateAnalysis({ ...analysis, sourceCandidates: candidates });
-              }}
-            />
-          </div>
-        ))}
-      </AnalysisCard>
-
-      {isLiterature ? (
-        <LiteratureDraftEditor
-          analysis={analysis}
-          onChange={(a) => updateAnalysis(a)}
-        />
-      ) : (
-        <NonLiteratureDraftEditor
-          analysis={analysis}
-          onChange={(a) => updateAnalysis(a)}
-        />
+      {originalOcrText && (
+        <details className="rounded-xl border border-border bg-gray-50 p-3">
+          <summary className="cursor-pointer text-sm font-medium text-muted">OCR 원문</summary>
+          <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap text-sm leading-relaxed">
+            {originalOcrText}
+          </pre>
+        </details>
       )}
 
-      <AnalysisCard title="출제 포인트 (수정 가능)" icon="🎯">
-        <BulletList
-          items={analysis.examPoints}
-          editable
-          onChange={(items) => updateAnalysis({ ...analysis, examPoints: items })}
-        />
-      </AnalysisCard>
+      {correctedOcrText && correctedOcrText !== originalOcrText && (
+        <details open className="rounded-xl border border-primary/20 bg-primary/5 p-3">
+          <summary className="cursor-pointer text-sm font-medium text-primary">
+            작품 기반 교정 OCR
+          </summary>
+          <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap text-sm leading-relaxed">
+            {correctedOcrText}
+          </pre>
+        </details>
+      )}
 
-      <AnalysisCard title="예상 문제 (수정 가능)" icon="❓">
-        <div className="space-y-3">
-          {analysis.sampleQuestions.map((q, i) => (
-            <div key={i} className="rounded-lg border border-border bg-gray-50 p-3">
-              <EditableField
-                label={`문제 ${i + 1} (${q.type})`}
-                value={q.question}
-                onChange={(v) => {
-                  const qs = [...analysis.sampleQuestions];
-                  qs[i] = { ...qs[i], question: v };
-                  updateAnalysis({ ...analysis, sampleQuestions: qs });
-                }}
-                multiline
-              />
-            </div>
-          ))}
-        </div>
-      </AnalysisCard>
+      {extractedText && (
+        <details className="rounded-xl border border-border bg-gray-50 p-3">
+          <summary className="cursor-pointer text-sm font-medium text-muted">
+            OCR 추출 지문 (일부 · 저작권 보호)
+          </summary>
+          <textarea
+            value={extractedText}
+            onChange={(e) => onResultChange({ ...result, extractedText: e.target.value })}
+            className="mt-2 max-h-40 min-h-[80px] w-full resize-y rounded-lg border border-border bg-white p-3 text-sm leading-relaxed"
+          />
+        </details>
+      )}
 
-      <EditableField
-        label="분석 요약"
-        value={analysis.summary}
-        onChange={(v) => updateAnalysis({ ...analysis, summary: v })}
-        multiline
-      />
+      <DetailedAnalysisReport report={analysis} onChange={updateAnalysis} />
 
       <DisclaimerBanner disclaimer={disclaimer} />
 
@@ -252,83 +172,14 @@ export function AnalysisResultView({
             {isExporting ? "생성 중..." : "📝 HWP 구조"}
           </button>
         </div>
-        <button type="button" onClick={onReset} className="w-full rounded-xl bg-primary py-3.5 text-sm font-semibold text-white">
+        <button
+          type="button"
+          onClick={onReset}
+          className="w-full rounded-xl bg-primary py-3.5 text-sm font-semibold text-white"
+        >
           새 지문 분석하기
         </button>
       </div>
     </div>
-  );
-}
-
-function LiteratureDraftEditor({
-  analysis,
-  onChange,
-}: {
-  analysis: LiteratureAnalysis;
-  onChange: (a: LiteratureAnalysis) => void;
-}) {
-  return (
-    <>
-      <AnalysisCard title="문학 분석 초안" icon="📚" variant="literature">
-        <div className="space-y-3">
-          <EditableField label="갈래" value={analysis.genre} onChange={(v) => onChange({ ...analysis, genre: v })} />
-          <EditableField label="시대/배경" value={analysis.era} onChange={(v) => onChange({ ...analysis, era: v })} />
-          <EditableField label="주제" value={analysis.theme} onChange={(v) => onChange({ ...analysis, theme: v })} multiline />
-          <EditableField label="화자/서술자" value={analysis.narrator} onChange={(v) => onChange({ ...analysis, narrator: v })} multiline />
-          <EditableField label="정서와 태도" value={analysis.emotionAndAttitude} onChange={(v) => onChange({ ...analysis, emotionAndAttitude: v })} multiline />
-        </div>
-      </AnalysisCard>
-      <AnalysisCard title="표현법 (수정 가능)" icon="✍️" variant="literature">
-        <BulletList
-          items={analysis.expressions}
-          editable
-          onChange={(items) => onChange({ ...analysis, expressions: items })}
-        />
-      </AnalysisCard>
-    </>
-  );
-}
-
-function NonLiteratureDraftEditor({
-  analysis,
-  onChange,
-}: {
-  analysis: NonLiteratureAnalysis;
-  onChange: (a: NonLiteratureAnalysis) => void;
-}) {
-  return (
-    <>
-      <AnalysisCard title="비문학 분석 초안" icon="📋" variant="non-literature">
-        <div className="space-y-3">
-          <EditableField label="분야" value={analysis.field} onChange={(v) => onChange({ ...analysis, field: v })} />
-          <EditableField label="중심 화제" value={analysis.centralTopic} onChange={(v) => onChange({ ...analysis, centralTopic: v })} multiline />
-          <EditableField label="글의 구조" value={analysis.structure} onChange={(v) => onChange({ ...analysis, structure: v })} multiline />
-        </div>
-      </AnalysisCard>
-      <AnalysisCard title="문단별 요지 (수정 가능)" icon="📝" variant="non-literature">
-        <div className="space-y-2">
-          {analysis.paragraphSummaries.map((p, i) => (
-            <EditableField
-              key={p.paragraph}
-              label={`${p.paragraph}문단`}
-              value={p.summary}
-              onChange={(v) => {
-                const summaries = [...analysis.paragraphSummaries];
-                summaries[i] = { ...summaries[i], summary: v };
-                onChange({ ...analysis, paragraphSummaries: summaries });
-              }}
-              multiline
-            />
-          ))}
-        </div>
-      </AnalysisCard>
-      <AnalysisCard title="핵심 개념 (수정 가능)" icon="💡" variant="non-literature">
-        <BulletList
-          items={analysis.keyConcepts}
-          editable
-          onChange={(items) => onChange({ ...analysis, keyConcepts: items })}
-        />
-      </AnalysisCard>
-    </>
   );
 }

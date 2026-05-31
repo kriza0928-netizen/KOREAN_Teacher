@@ -1,6 +1,7 @@
 "use client";
 
 import type { WorkSearchMatch, WorkSelection } from "@/lib/literature/types";
+import type { OcrSearchFeatures } from "@/lib/literature/extract-features";
 import type { TextClassification } from "@/types";
 
 interface WorkCandidatePickerProps {
@@ -8,6 +9,7 @@ interface WorkCandidatePickerProps {
   searchResult: {
     matches: WorkSearchMatch[];
     notFound: boolean;
+    extractedFeatures?: OcrSearchFeatures;
   } | null;
   isSearching: boolean;
   selection: WorkSelection | null;
@@ -24,7 +26,8 @@ interface WorkCandidatePickerProps {
 }
 
 function formatReasonLabel(reason: WorkSearchMatch["matchReasons"][0]): string {
-  return reason.matchedTerm || reason.label.replace(/ 일치| 구절 일치| 키워드 일치/g, "");
+  if (reason.matchedTerm) return reason.matchedTerm;
+  return reason.label;
 }
 
 export function WorkCandidatePicker({
@@ -60,11 +63,34 @@ export function WorkCandidatePicker({
       <div>
         <h2 className="mb-1 text-base font-semibold text-primary">작품 후보 선택</h2>
         <p className="mb-3 text-xs text-muted">
-          유사도 순 상위 후보 중 하나를 선택한 뒤 분석하세요.
+          작품 특징(고유명사·소재·주제) 매칭 기준 상위 3개 후보입니다.
         </p>
 
         {isSearching && (
           <p className="rounded-lg bg-gray-50 p-4 text-sm text-muted">작품 DB 검색 중...</p>
+        )}
+
+        {!isSearching && searchResult?.extractedFeatures && (
+          <div className="mb-4 rounded-xl border border-border bg-gray-50 p-3">
+            <p className="mb-2 text-xs font-semibold text-muted">OCR에서 추출한 작품 특징</p>
+            <div className="flex flex-wrap gap-2">
+              {[
+                ...searchResult.extractedFeatures.properNouns,
+                ...searchResult.extractedFeatures.symbolCandidates.slice(0, 4),
+                ...searchResult.extractedFeatures.emotions,
+              ]
+                .filter(Boolean)
+                .slice(0, 8)
+                .map((term, i) => (
+                  <span
+                    key={i}
+                    className="rounded-full bg-white px-2.5 py-1 text-xs text-gray-800"
+                  >
+                    {term}
+                  </span>
+                ))}
+            </div>
+          </div>
         )}
 
         {!isSearching && matches.length > 0 && (
@@ -92,7 +118,7 @@ export function WorkCandidatePicker({
                       )}
                     </div>
                     <span className="shrink-0 rounded-full bg-accent/15 px-3 py-1 text-sm font-bold text-accent">
-                      유사도 {match.score}%
+                      신뢰도 {match.score}%
                     </span>
                   </div>
 

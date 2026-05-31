@@ -7,6 +7,8 @@ export interface AnalysisProvider {
 
 export interface AnalyzeInput {
   text: string;
+  originalOcrText?: string;
+  correctedOcrText?: string;
   ocr: {
     success: boolean;
     confidence: number;

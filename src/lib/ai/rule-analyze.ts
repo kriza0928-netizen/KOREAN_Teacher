@@ -6,7 +6,7 @@ import {
   buildOcrMeta,
   validatePreClassification,
 } from "@/lib/validation/text";
-import { generateLiteratureDraft, generateNonLiteratureDraft } from "@/lib/ai/rule-generators";
+import { generateDeepAnalysis } from "@/lib/ai/deep-analysis/generator";
 
 export async function analyzeWithRules(input: AnalyzeInput): Promise<AnalysisResponse> {
   const trimmed = input.text.trim();
@@ -21,7 +21,14 @@ export async function analyzeWithRules(input: AnalyzeInput): Promise<AnalysisRes
   });
 
   if (preCheck) {
-    return { ...preCheck, extractedText: trimmed, isDraft: false, analysisProvider: "rule-based" };
+    return {
+      ...preCheck,
+      extractedText: trimmed,
+      originalOcrText: input.originalOcrText?.trim() || trimmed,
+      correctedOcrText: input.correctedOcrText?.trim(),
+      isDraft: false,
+      analysisProvider: "rule-based",
+    };
   }
 
   if (!input.selectedWork?.title?.trim()) {
@@ -42,15 +49,14 @@ export async function analyzeWithRules(input: AnalyzeInput): Promise<AnalysisRes
   const classification = classifyText(trimmed);
   const textType = classificationToTextType(classification);
 
-  const analysis =
-    textType === "literature"
-      ? generateLiteratureDraft(trimmed, classification, input.selectedWork)
-      : generateNonLiteratureDraft(trimmed, classification, input.selectedWork);
+  const analysis = generateDeepAnalysis(trimmed, classification, input.selectedWork);
 
   return buildAnalysisResponse({
     status: "complete",
     ocr: ocrMeta,
     extractedText: trimmed,
+    originalOcrText: input.originalOcrText?.trim() || trimmed,
+    correctedOcrText: input.correctedOcrText?.trim(),
     classification,
     textType,
     confidence: classification.confidence / 100,

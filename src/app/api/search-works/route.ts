@@ -5,14 +5,21 @@ export const runtime = "nodejs";
 
 export async function POST(request: NextRequest) {
   try {
-    const body = (await request.json()) as { text?: string };
+    const body = (await request.json()) as {
+      text?: string;
+      rawText?: string;
+      cleanedText?: string;
+    };
     const text = body.text?.trim() ?? "";
 
     if (!text) {
       return NextResponse.json({ error: "검색할 텍스트가 필요합니다." }, { status: 400 });
     }
 
-    const result = searchLiteratureWorks(text);
+    const result = searchLiteratureWorks(text, {
+      rawText: body.rawText?.trim() || text,
+      cleanedText: body.cleanedText?.trim(),
+    });
 
     return NextResponse.json({
       ...result,

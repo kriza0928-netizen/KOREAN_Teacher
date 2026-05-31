@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as AnalyzeRequest;
-    const { text, ocr, textManuallyVerified, selectedWork } = body;
+    const { text, ocr, textManuallyVerified, selectedWork, originalOcrText, correctedOcrText } = body;
 
     if (!selectedWork?.title?.trim()) {
       return NextResponse.json({ error: "분석 전 작품을 선택해 주세요." }, { status: 400 });
@@ -24,6 +24,8 @@ export async function POST(request: NextRequest) {
     const provider = createAnalysisProvider();
     const result = await provider.analyze({
       text,
+      originalOcrText,
+      correctedOcrText,
       ocr: {
         success: Boolean(ocr.success),
         confidence: ocr.confidence,

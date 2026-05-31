@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { AnalysisResponse, TextClassification } from "@/types";
 import type { WorkSearchMatch, WorkSearchResult, WorkSelection } from "@/lib/literature/types";
 import { enrichWorkSelection } from "@/lib/literature/search";
@@ -12,8 +12,14 @@ import { AnalysisResultView } from "@/components/AnalysisResult";
 import { LoadingOverlay } from "@/components/LoadingOverlay";
 import { DisclaimerBanner } from "@/components/DisclaimerBanner";
 import { DEFAULT_DISCLAIMER } from "@/lib/rag";
-import { runTesseractOcr } from "@/lib/ocr/tesseract-browser";
+import { runTesseractOcr, warmOcrWorkers } from "@/lib/ocr/tesseract-browser";
 import type { OcrDebugInfo } from "@/lib/ocr/ocr-debug";
+import type { OcrTiming } from "@/lib/ocr/ocr-timing";
+import { postProcessOcrText } from "@/lib/ocr/post-process";
+import {
+  applyCorrectionSuggestions,
+  type WorkBasedCorrectionResult,
+} from "@/lib/ocr/work-based-correction";
 import {
   LOW_OCR_CONFIDENCE_MESSAGE,
   MIN_OCR_CONFIDENCE_PERCENT,
@@ -28,10 +34,47 @@ const STEP_INDEX: Record<Step, number> = {
   result: 3,
 };
 
+async function fetchWorkCorrection(text: string): Promise<{
+  searchResult: WorkSearchResult;
+  correction: WorkBasedCorrectionResult;
+}> {
+  const res = await fetch("/api/work-correction", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      text,
+      rawText: text,
+      cleanedText: postProcessOcrText(text),
+    }),
+  });
+
+  const data = await res.json();
+
+  if (res.ok) {
+    return {
+      searchResult: data.searchResult as WorkSearchResult,
+      correction: data.correction as WorkBasedCorrectionResult,
+    };
+  }
+
+  return {
+    searchResult: { phrases: [], normalizedText: "", matches: [], notFound: true },
+    correction: {
+      eligible: false,
+      workCandidates: [],
+      suggestions: [],
+      previewText: text,
+    },
+  };
+}
+
 export default function HomePage() {
   const [step, setStep] = useState<Step>("capture");
   const [ocrText, setOcrText] = useState("");
+  const [ocrOriginalText, setOcrOriginalText] = useState("");
+  const [ocrCorrectedText, setOcrCorrectedText] = useState<string | undefined>();
   const [ocrRawText, setOcrRawText] = useState("");
+  const [ocrCleanedText, setOcrCleanedText] = useState("");
   const [ocrDebug, setOcrDebug] = useState<OcrDebugInfo | undefined>();
   const [initialOcrText, setInitialOcrText] = useState("");
   const [ocrConfidence, setOcrConfidence] = useState(0);
@@ -40,6 +83,9 @@ export default function HomePage() {
   const [ocrLowConfidence, setOcrLowConfidence] = useState(false);
   const [classification, setClassification] = useState<TextClassification | null>(null);
   const [workSearchResult, setWorkSearchResult] = useState<WorkSearchResult | null>(null);
+  const [correctionResult, setCorrectionResult] = useState<WorkBasedCorrectionResult | null>(null);
+  const [correctionLoading, setCorrectionLoading] = useState(false);
+  const [appliedCorrectionIds, setAppliedCorrectionIds] = useState<Set<string>>(new Set());
   const [workSelection, setWorkSelection] = useState<WorkSelection | null>(null);
   const [manualOpen, setManualOpen] = useState(false);
   const [manualTitle, setManualTitle] = useState("");
@@ -50,51 +96,148 @@ export default function HomePage() {
   const [loadingMessage, setLoadingMessage] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
+  const [ocrTiming, setOcrTiming] = useState<OcrTiming | null>(null);
+  const [workSearchMs, setWorkSearchMs] = useState<number | null>(null);
 
-  const handleCapture = useCallback(async (file: File) => {
-    setError(null);
-    setLoading(true);
-    setLoadingMessage("이미지 전처리 및 OCR 준비 중...");
+  useEffect(() => {
+    void warmOcrWorkers();
+  }, []);
+
+  const loadWorkCorrection = useCallback(async (text: string) => {
+    setCorrectionLoading(true);
+    setWorkSearchMs(null);
+    console.time("[OCR] work-search");
+    const startedAt = performance.now();
 
     try {
-      const result = await runTesseractOcr(file, {
-        onProgress: (progress, message) => {
-          setLoadingMessage(message ?? `OCR 진행 중... ${progress}%`);
-        },
+      const { searchResult, correction } = await fetchWorkCorrection(text);
+      setWorkSearchResult(searchResult);
+      setCorrectionResult(correction);
+    } catch {
+      setWorkSearchResult({ phrases: [], normalizedText: "", matches: [], notFound: true });
+      setCorrectionResult({
+        eligible: false,
+        workCandidates: [],
+        suggestions: [],
+        previewText: text,
       });
-
-      setOcrRawText(result.rawText ?? result.text);
-      setOcrDebug(result.debug);
-      setOcrText(result.text);
-      setInitialOcrText(result.text);
-      setOcrConfidence(result.confidence);
-      setOcrProvider(result.provider);
-      setOcrSuccess(result.success);
-      setOcrLowConfidence(
-        result.lowConfidence ?? result.confidence < MIN_OCR_CONFIDENCE_PERCENT
-      );
-      setClassification(null);
-      setWorkSearchResult(null);
-      setWorkSelection(null);
-      setManualOpen(false);
-      setManualTitle("");
-      setManualAuthor("");
-      setManualSource("");
-
-      if (result.lowConfidence ?? result.confidence < MIN_OCR_CONFIDENCE_PERCENT) {
-        setError(LOW_OCR_CONFIDENCE_MESSAGE);
-      }
-
-      setStep("edit");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "OCR 처리 오류");
     } finally {
-      setLoading(false);
+      const ms = Math.round(performance.now() - startedAt);
+      console.timeEnd("[OCR] work-search");
+      setWorkSearchMs(ms);
+      setCorrectionLoading(false);
     }
   }, []);
 
+  const applySuggestionToText = useCallback(
+    (text: string, suggestionId: string, shouldApply: boolean) => {
+      if (!correctionResult) return text;
+
+      const suggestion = correctionResult.suggestions.find((s) => s.id === suggestionId);
+      if (!suggestion) return text;
+
+      const lines = text.split("\n");
+      if (suggestion.lineIndex < 0 || suggestion.lineIndex >= lines.length) return text;
+
+      lines[suggestion.lineIndex] = shouldApply
+        ? suggestion.correctedLine
+        : suggestion.originalLine;
+
+      return lines.join("\n");
+    },
+    [correctionResult]
+  );
+
+  const handleCapture = useCallback(
+    async (file: File) => {
+      setError(null);
+      setLoading(true);
+      setLoadingMessage("이미지 전처리 및 OCR 준비 중...");
+
+      try {
+        const result = await runTesseractOcr(file, {
+          onProgress: (progress, message) => {
+            setLoadingMessage(message ?? `OCR 진행 중... ${progress}%`);
+          },
+        });
+
+        const raw = result.rawText ?? result.text;
+
+        setOcrRawText(raw);
+        setOcrCleanedText(result.cleanedText ?? postProcessOcrText(raw));
+        setOcrDebug(result.debug);
+        setOcrTiming(result.timing ?? null);
+        setWorkSearchMs(null);
+        setOcrText(raw);
+        setOcrOriginalText(raw);
+        setOcrCorrectedText(undefined);
+        setInitialOcrText(raw);
+        setOcrConfidence(result.confidence);
+        setOcrProvider(result.provider);
+        setOcrSuccess(result.success);
+        setOcrLowConfidence(
+          result.lowConfidence ?? result.confidence < MIN_OCR_CONFIDENCE_PERCENT
+        );
+        setClassification(null);
+        setWorkSearchResult(null);
+        setCorrectionResult(null);
+        setAppliedCorrectionIds(new Set());
+        setWorkSelection(null);
+        setManualOpen(false);
+        setManualTitle("");
+        setManualAuthor("");
+        setManualSource("");
+
+        if (result.lowConfidence ?? result.confidence < MIN_OCR_CONFIDENCE_PERCENT) {
+          setError(LOW_OCR_CONFIDENCE_MESSAGE);
+        }
+
+        setStep("edit");
+        setLoading(false);
+
+        await loadWorkCorrection(raw);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "OCR 처리 오류");
+        setLoading(false);
+      }
+    },
+    [loadWorkCorrection]
+  );
+
   const textManuallyVerified =
     ocrText.trim() !== initialOcrText.trim() && ocrText.trim().length > 0;
+
+  const handleToggleCorrection = useCallback(
+    (id: string) => {
+      if (!correctionResult) return;
+
+      setAppliedCorrectionIds((prev) => {
+        const next = new Set(prev);
+        const willApply = !next.has(id);
+        if (willApply) next.add(id);
+        else next.delete(id);
+
+        setOcrText((current) => applySuggestionToText(current, id, willApply));
+        return next;
+      });
+    },
+    [correctionResult, applySuggestionToText]
+  );
+
+  const handleApplyAllCorrections = useCallback(() => {
+    if (!correctionResult) return;
+
+    const ids = correctionResult.suggestions.map((s) => s.id);
+    setAppliedCorrectionIds(new Set(ids));
+    setOcrText(applyCorrectionSuggestions(ocrOriginalText, correctionResult.suggestions, new Set(ids)));
+  }, [correctionResult, ocrOriginalText]);
+
+  const handleIgnoreAllCorrections = useCallback(() => {
+    if (!correctionResult) return;
+
+    setAppliedCorrectionIds(new Set());
+    setOcrText(ocrOriginalText);
+  }, [correctionResult, ocrOriginalText]);
 
   const handleProceedToSelect = useCallback(async () => {
     if (ocrLowConfidence && !textManuallyVerified) {
@@ -104,12 +247,15 @@ export default function HomePage() {
 
     setError(null);
     setLoading(true);
-    setLoadingMessage("지문 분류 및 작품 DB 검색 중...");
+    setLoadingMessage("작품 분류 및 검색 결과 확인 중...");
     setWorkSelection(null);
     setManualOpen(false);
 
+    const hasAppliedCorrections = appliedCorrectionIds.size > 0;
+    setOcrCorrectedText(hasAppliedCorrections ? ocrText : undefined);
+
     try {
-      const [classifyRes, searchRes] = await Promise.all([
+      const [classifyRes, correctionData] = await Promise.all([
         fetch("/api/classify", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -118,26 +264,17 @@ export default function HomePage() {
             extractionConfidence: ocrConfidence,
           }),
         }),
-        fetch("/api/search-works", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: ocrText }),
-        }),
+        fetchWorkCorrection(ocrText),
       ]);
 
       const classifyData = await classifyRes.json();
-      const searchData = await searchRes.json();
 
       if (classifyRes.ok && !classifyData.blocked && classifyData.category) {
         setClassification(classifyData as TextClassification);
       }
 
-      if (searchRes.ok) {
-        setWorkSearchResult(searchData as WorkSearchResult);
-      } else {
-        setWorkSearchResult({ phrases: [], normalizedText: "", matches: [], notFound: true });
-      }
-
+      setWorkSearchResult(correctionData.searchResult);
+      setCorrectionResult(correctionData.correction);
       setStep("select");
     } catch (e) {
       setError(e instanceof Error ? e.message : "작품 검색 오류");
@@ -146,11 +283,10 @@ export default function HomePage() {
     }
   }, [
     ocrText,
-    ocrSuccess,
     ocrConfidence,
-    ocrProvider,
     ocrLowConfidence,
     textManuallyVerified,
+    appliedCorrectionIds.size,
   ]);
 
   const handleSelectCandidate = useCallback((match: WorkSearchMatch) => {
@@ -183,12 +319,16 @@ export default function HomePage() {
     setLoading(true);
     setLoadingMessage("선택 작품 기준 분석 초안 생성 중...");
 
+    const analysisText = ocrText;
+
     try {
       const res = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          text: ocrText,
+          text: analysisText,
+          originalOcrText: ocrOriginalText,
+          correctedOcrText: ocrCorrectedText,
           ocr: {
             success: ocrSuccess || textManuallyVerified,
             confidence: ocrConfidence,
@@ -218,11 +358,12 @@ export default function HomePage() {
     }
   }, [
     ocrText,
+    ocrOriginalText,
+    ocrCorrectedText,
     ocrConfidence,
     ocrProvider,
     ocrSuccess,
     workSelection,
-    ocrLowConfidence,
     textManuallyVerified,
   ]);
 
@@ -263,7 +404,10 @@ export default function HomePage() {
   const handleReset = () => {
     setStep("capture");
     setOcrText("");
+    setOcrOriginalText("");
+    setOcrCorrectedText(undefined);
     setOcrRawText("");
+    setOcrCleanedText("");
     setOcrDebug(undefined);
     setInitialOcrText("");
     setOcrConfidence(0);
@@ -272,6 +416,9 @@ export default function HomePage() {
     setOcrLowConfidence(false);
     setClassification(null);
     setWorkSearchResult(null);
+    setCorrectionResult(null);
+    setCorrectionLoading(false);
+    setAppliedCorrectionIds(new Set());
     setWorkSelection(null);
     setManualOpen(false);
     setManualTitle("");
@@ -279,6 +426,8 @@ export default function HomePage() {
     setManualSource("");
     setAnalysis(null);
     setError(null);
+    setOcrTiming(null);
+    setWorkSearchMs(null);
   };
 
   return (
@@ -305,12 +454,21 @@ export default function HomePage() {
           <TextEditor
             text={ocrText}
             rawText={ocrRawText}
+            cleanedText={ocrCleanedText}
             ocrDebug={ocrDebug}
             initialText={initialOcrText}
             confidence={ocrConfidence}
             ocrSuccess={ocrSuccess}
             ocrLowConfidence={ocrLowConfidence}
+            correctionResult={correctionResult}
+            correctionLoading={correctionLoading}
+            appliedCorrectionIds={appliedCorrectionIds}
+            ocrTiming={ocrTiming}
+            workSearchMs={workSearchMs}
             onChange={setOcrText}
+            onToggleCorrection={handleToggleCorrection}
+            onApplyAllCorrections={handleApplyAllCorrections}
+            onIgnoreAllCorrections={handleIgnoreAllCorrections}
             onProceed={handleProceedToSelect}
             onBack={handleReset}
             isLoading={loading}

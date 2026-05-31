@@ -4,15 +4,20 @@ export const OPENAI_VISION_PROVIDER = "gpt-4o-vision";
 
 export interface OcrResult {
   text: string;
-  /** Tesseract 원본 텍스트 (후처리 없음, trim 제외 displayText와 비교용) */
+  /** Tesseract 원문 (한글 교정·의미 추론 없음) */
   rawText?: string;
+  /** 검색 보조용 정제 OCR */
+  cleanedText?: string;
   confidence: number;
   provider: string;
   success: boolean;
   psm?: number;
   preprocessed?: boolean;
   lowConfidence?: boolean;
+  poetryMode?: boolean;
+  topCandidates?: import("@/lib/ocr/ocr-debug").OcrTopCandidate[];
   debug?: import("@/lib/ocr/ocr-debug").OcrDebugInfo;
+  timing?: import("@/lib/ocr/ocr-timing").OcrTiming;
 }
 
 export interface OcrProvider {

@@ -1,5 +1,10 @@
 "use client";
 
+/** NEXT_PUBLIC_OCR_DEBUG=true 일 때만 상세 OCR 로그·패널 표시 */
+export function isOcrDebugEnabled(): boolean {
+  return process.env.NEXT_PUBLIC_OCR_DEBUG === "true";
+}
+
 type TesseractPage = {
   text?: string | null;
   confidence?: number | null;
@@ -18,14 +23,33 @@ type TesseractPage = {
 export interface OcrAttemptLog {
   source: string;
   sourceKey: string;
+  lang: string;
   psm: number;
   rawText: string;
   textLength: number;
   confidence: number;
   koreanRatio: number;
+  specialCharRatio: number;
   sentenceCount: number;
   avgWordLength: number;
   readabilityScore: number;
+  workPhraseBonus: number;
+  combinedScore: number;
+}
+
+export interface OcrTopCandidate {
+  rank: number;
+  lang: string;
+  source: string;
+  psm: number;
+  rawText: string;
+  cleanedText: string;
+  koreanRatio: number;
+  specialCharRatio: number;
+  readabilityScore: number;
+  workPhraseBonus: number;
+  combinedScore: number;
+  matchedWork?: string;
 }
 
 export interface OcrVariantSummary {
@@ -43,6 +67,9 @@ export interface OcrVariantSummary {
 export interface OcrDebugInfo {
   attempts: OcrAttemptLog[];
   variantSummaries: OcrVariantSummary[];
+  topCandidates: OcrTopCandidate[];
+  poetryMode: boolean;
+  selectedLang: string;
   selectedSource: string;
   selectedSourceKey: string;
   selectedPsm: number;
@@ -50,13 +77,17 @@ export interface OcrDebugInfo {
   displayText: string;
   confidence: number;
   koreanRatio: number;
+  specialCharRatio: number;
   sentenceCount: number;
   avgWordLength: number;
   readabilityScore: number;
+  workPhraseBonus: number;
+  combinedScore: number;
   trace: string[];
 }
 
 export function logTesseractRecognizeResult(label: string, result: unknown): void {
+  if (!isOcrDebugEnabled()) return;
   console.log(`[OCR ${label}] result`, result);
   const data = (result as { data?: TesseractPage })?.data;
   if (data) {
@@ -82,21 +113,31 @@ export function extractRawOcrText(data: TesseractPage): string {
 
 function collectTextFromBlocks(blocks: TesseractPage["blocks"]): string {
   if (!blocks) return "";
-  return blocks
-    .map((block) => {
-      if (block.text?.trim()) return block.text;
-      return (block.paragraphs ?? [])
-        .map((p) => {
-          if (p.text?.trim()) return p.text;
-          return (p.lines ?? []).map((line) => line.text ?? "").join("\n");
-        })
-        .join("\n\n");
-    })
-    .join("\n\n");
+
+  const lines: string[] = [];
+  for (const block of blocks) {
+    for (const paragraph of block.paragraphs ?? []) {
+      if (paragraph.lines?.length) {
+        for (const line of paragraph.lines) {
+          const t = line.text?.trim();
+          if (t) lines.push(t);
+        }
+        continue;
+      }
+      const pText = paragraph.text?.trim();
+      if (pText) lines.push(...pText.split(/\n+/).map((l) => l.trim()).filter(Boolean));
+    }
+
+    if (!block.paragraphs?.length && block.text?.trim()) {
+      lines.push(...block.text.split(/\n+/).map((l) => l.trim()).filter(Boolean));
+    }
+  }
+
+  return lines.join("\n");
 }
 
 export function toDisplayText(rawText: string): string {
-  return rawText.trim();
+  return rawText.replace(/\0/g, "").replace(/\r\n/g, "\n").trim();
 }
 
 export function computeOcrConfidence(data: TesseractPage): number {
@@ -135,6 +176,7 @@ function collectWordsFromBlocks(
 }
 
 export function logFinalOcrText(rawText: string, displayText: string): void {
+  if (!isOcrDebugEnabled()) return;
   console.log("[OCR] text.length", displayText.length);
   console.log("[OCR] text", displayText);
   console.log("[OCR] rawText.length", rawText.length);
@@ -154,6 +196,7 @@ export function buildVariantSummaries(
     const variantAttempts = attempts.filter((a) => a.sourceKey === sourceKey);
     const best = [...variantAttempts].sort(
       (a, b) =>
+        b.combinedScore - a.combinedScore ||
         b.readabilityScore - a.readabilityScore ||
         b.koreanRatio - a.koreanRatio ||
         b.textLength - a.textLength

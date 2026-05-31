@@ -1,7 +1,7 @@
 "use client";
 
 import type { OcrDebugInfo } from "@/lib/ocr/ocr-debug";
-import { formatOcrDebugBlock } from "@/lib/ocr/ocr-debug";
+import { formatOcrDebugBlock, isOcrDebugEnabled } from "@/lib/ocr/ocr-debug";
 
 interface OcrDebugPanelProps {
   rawText: string;
@@ -10,27 +10,72 @@ interface OcrDebugPanelProps {
 }
 
 export function OcrDebugPanel({ rawText, displayText, debug }: OcrDebugPanelProps) {
+  if (!isOcrDebugEnabled()) return null;
+
   const variantSummaries = debug?.variantSummaries ?? [];
   const selectedKey = debug?.selectedSourceKey;
+  const topCandidates = debug?.topCandidates ?? [];
 
   return (
-    <details open className="rounded-xl border border-dashed border-gray-400 bg-gray-50 p-4 text-xs">
+    <details className="rounded-xl border border-dashed border-gray-400 bg-gray-50 p-4 text-xs">
       <summary className="cursor-pointer font-semibold text-gray-800">
-        OCR 디버그 — 변형별 결과
+        OCR 디버그 — 후보·변형별 결과
       </summary>
 
       <div className="mt-3 space-y-4">
         <div className="rounded-lg bg-white p-3 text-gray-700">
           <p className="font-semibold text-primary">최종 선택</p>
           <p>
-            {debug?.selectedSource ?? "—"} / PSM {debug?.selectedPsm ?? "—"} · 가독성{" "}
-            {debug?.readabilityScore ?? "—"} · confidence {debug?.confidence ?? "—"}%
+            {debug?.poetryMode ? "시 모드 · " : ""}
+            {debug?.selectedLang ?? "—"} / {debug?.selectedSource ?? "—"} / PSM{" "}
+            {debug?.selectedPsm ?? "—"}
+          </p>
+          <p className="mt-1">
+            종합 {debug?.combinedScore ?? "—"} (가독성 {debug?.readabilityScore ?? "—"} + 작품DB{" "}
+            {debug?.workPhraseBonus ?? 0}) · conf {debug?.confidence ?? "—"}%
           </p>
           <p className="mt-1 text-muted">
-            한글 {Math.round((debug?.koreanRatio ?? 0) * 100)}% · 문장 {debug?.sentenceCount ?? 0} ·
-            평균 단어 {debug?.avgWordLength ?? 0}자
+            한글 {Math.round((debug?.koreanRatio ?? 0) * 100)}% · 특수문자{" "}
+            {Math.round((debug?.specialCharRatio ?? 0) * 100)}% · 문장 {debug?.sentenceCount ?? 0}
           </p>
         </div>
+
+        {topCandidates.length > 0 && (
+          <div>
+            <p className="mb-2 font-medium text-gray-800">OCR 후보 Top 2</p>
+            <div className="space-y-2">
+              {topCandidates.map((candidate) => (
+                <div
+                  key={candidate.rank}
+                  className={`rounded-lg border p-3 ${
+                    candidate.rank === 1
+                      ? "border-primary bg-primary/5"
+                      : "border-gray-200 bg-white"
+                  }`}
+                >
+                  <p className="font-semibold text-gray-900">
+                    후보 {candidate.rank}
+                    {candidate.rank === 1 && " ✓ 선택"}
+                  </p>
+                  <p className="text-[10px] text-muted">
+                    {candidate.lang} · {candidate.source} · PSM {candidate.psm} · 종합{" "}
+                    {candidate.combinedScore} (가독성 {candidate.readabilityScore} + DB{" "}
+                    {candidate.workPhraseBonus})
+                  </p>
+                  <p className="text-[10px] text-muted">
+                    한글 {Math.round(candidate.koreanRatio * 100)}% · 특수문자{" "}
+                    {Math.round(candidate.specialCharRatio * 100)}%
+                    {candidate.matchedWork && ` · ${candidate.matchedWork}`}
+                  </p>
+                  <pre className="mt-2 max-h-24 overflow-auto whitespace-pre-wrap font-mono text-[10px] leading-relaxed text-gray-800">
+                    {candidate.rawText.slice(0, 200)}
+                    {candidate.rawText.length > 200 ? "…" : ""}
+                  </pre>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {variantSummaries.map((variant) => {
           const isSelected = variant.sourceKey === selectedKey;
@@ -52,10 +97,6 @@ export function OcrDebugPanel({ rawText, displayText, debug }: OcrDebugPanelProp
               <pre className="max-h-36 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-gray-800">
                 {formatOcrDebugBlock(`${variant.label} OCR`, variant.bestText)}
               </pre>
-              <p className="mt-2 text-[10px] text-muted">
-                conf {variant.confidence}% · 한글 {Math.round(variant.koreanRatio * 100)}% · 문장{" "}
-                {variant.sentenceCount} · 평균단어 {variant.avgWordLength}자
-              </p>
             </div>
           );
         })}
@@ -73,27 +114,6 @@ export function OcrDebugPanel({ rawText, displayText, debug }: OcrDebugPanelProp
               <li key={line}>• {line}</li>
             ))}
           </ul>
-        )}
-
-        {debug?.attempts && debug.attempts.length > 0 && (
-          <div>
-            <p className="mb-1 font-medium text-gray-800">전체 시도 (가독성 상위 5)</p>
-            <div className="max-h-32 overflow-auto rounded-lg bg-white p-2">
-              {[...debug.attempts]
-                .sort(
-                  (a, b) =>
-                    b.readabilityScore - a.readabilityScore ||
-                    b.koreanRatio - a.koreanRatio
-                )
-                .slice(0, 5)
-                .map((a, i) => (
-                  <p key={i} className="font-mono text-[10px] text-gray-700">
-                    [{a.source} PSM{a.psm}] 가독성={a.readabilityScore} conf={a.confidence}% 한글=
-                    {Math.round(a.koreanRatio * 100)}% len={a.textLength}
-                  </p>
-                ))}
-            </div>
-          </div>
         )}
       </div>
     </details>

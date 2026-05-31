@@ -24,7 +24,7 @@ export function ImageCapture({ onCapture, isLoading }: ImageCaptureProps) {
       <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
         <h2 className="mb-1 text-base font-semibold text-primary">지문 촬영 또는 업로드</h2>
         <p className="mb-4 text-sm text-muted">
-          교재·시험지 지문을 촬영하면 전처리(흑백·대비·크롭·확대) 후 Tesseract.js(kor+eng) OCR을 수행합니다.
+          교재·시험지 지문을 촬영하면 전처리(흑백·대비·크롭·확대) 후 kor / kor+eng 이중 OCR을 수행합니다.
         </p>
 
         {preview ? (
@@ -65,14 +65,18 @@ export function ImageCapture({ onCapture, isLoading }: ImageCaptureProps) {
           type="file"
           accept="image/*"
           capture="environment"
-          className="hidden"
+          className="sr-only"
+          tabIndex={-1}
+          aria-hidden
           onChange={(e) => handleFile(e.target.files?.[0])}
         />
         <input
           ref={uploadRef}
           type="file"
           accept="image/*"
-          className="hidden"
+          className="sr-only"
+          tabIndex={-1}
+          aria-hidden
           onChange={(e) => handleFile(e.target.files?.[0])}
         />
       </div>

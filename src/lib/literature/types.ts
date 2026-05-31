@@ -1,3 +1,5 @@
+import type { OcrSearchFeatures } from "@/lib/literature/extract-features";
+
 export interface LiteratureWork {
   id: string;
   title: string;
@@ -5,20 +7,39 @@ export interface LiteratureWork {
   genre?: string;
   era?: string;
   source?: string;
+  /** @deprecated textbookKeywords·examKeywords 사용 권장 */
   keywords: string[];
-  /** OCR 오타·띄어쓰기 변형 구절 */
   keywordAliases?: string[];
-  /** 고유명사 (+40점) */
   properNouns?: string[];
-  /** 핵심 소재 (+25점) */
   materials?: string[];
-  /** 유명 구절 (+30점) */
   famousPhrases?: string[];
   aliases?: string[];
-  /** 작품 주제 */
   theme?: string;
-  /** 교과서 해설 */
   textbookGuide?: string;
+  /** 주제 목록 (상실, 고독, 자기 성찰 등) */
+  themes?: string[];
+  /** 상징어 (책갈피, 종이 등) */
+  symbols?: string[];
+  /** 대표 구절·시어 (uniquePhrases로 통합 권장) */
+  representativeLines?: string[];
+  /** 작품 특정 대표 구절 — 검색 최우선 */
+  uniquePhrases?: string[];
+  /** 핵심어 (+10점) */
+  searchKeywords?: string[];
+  /** 일반어 (+1점, 단독 후보 불가) */
+  weakKeywords?: string[];
+  /** 교과서 핵심어 */
+  textbookKeywords?: string[];
+  /** 내신·수능 출제어 */
+  examKeywords?: string[];
+  /** 반복 시어 */
+  repeatedTerms?: string[];
+  /** 정서 키워드 */
+  emotions?: string[];
+  /** 핵심 시어 (교과서) */
+  keyWords?: string[];
+  /** 교과서 수록 여부 (미지정 시 source에서 추론) */
+  isTextbook?: boolean;
 }
 
 export interface LiteratureWorksDatabase {
@@ -71,23 +92,23 @@ export interface WorkSelection {
 
 export interface WorkSearchResult {
   phrases: string[];
+  /** 원문 OCR 정규화 (검색 비교용) */
   normalizedText: string;
+  /** 정제 OCR 원문 */
+  cleanedText?: string;
+  /** 정제 OCR 정규화 (검색 비교용) */
+  cleanedNormalizedText?: string;
   matches: WorkSearchMatch[];
-  /** @deprecated UI에서 자동 선택하지 않음 — 후보만 표시 */
+  /** @deprecated UI에서 자동 선택하지 않음 */
   autoMatch?: WorkSearchMatch;
   notFound: boolean;
+  /** OCR에서 추출한 작품 특징 */
+  extractedFeatures?: OcrSearchFeatures;
 }
 
 export const AUTO_MATCH_THRESHOLD = 85;
-export const MIN_MATCH_THRESHOLD = 60;
+export const MIN_MATCH_THRESHOLD = 40;
 export const TOP_MATCH_COUNT = 5;
+
 export const PHRASE_COUNT_MIN = 3;
 export const PHRASE_COUNT_MAX = 5;
-
-export const SCORE = {
-  TITLE_AUTHOR: 50,
-  PROPER_NOUN: 40,
-  FAMOUS_PHRASE: 30,
-  MATERIAL: 25,
-  GENERIC_KEYWORD: 20,
-} as const;
